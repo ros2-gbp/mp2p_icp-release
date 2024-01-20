@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -13,6 +13,7 @@
 #include <mp2p_icp/ICP.h>
 #include <mp2p_icp/covariance.h>
 #include <mrpt/core/exceptions.h>
+#include <mrpt/core/lock_helper.h>
 #include <mrpt/poses/Lie/SE.h>
 #include <mrpt/tfest/se3.h>
 
@@ -25,11 +26,15 @@ using namespace mp2p_icp;
 void ICP::align(
     const metric_map_t& pcLocal, const metric_map_t& pcGlobal,
     const mrpt::math::TPose3D& initialGuessLocalWrtGlobal, const Parameters& p,
-    Results& result, const mrpt::optional_ref<LogRecord>& outputDebugInfo)
+    Results&                                                 result,
+    const std::optional<mrpt::poses::CPose3DPDFGaussianInf>& prior,
+    const mrpt::optional_ref<LogRecord>&                     outputDebugInfo)
 {
     using namespace std::string_literals;
 
     MRPT_START
+
+    mrpt::system::CTimeLoggerEntry tle(profiler_, "align");
 
     // ----------------------------
     // Initial sanity checks
@@ -44,6 +49,7 @@ void ICP::align(
     // ----------------------------
     // Preparation
     // ----------------------------
+    mrpt::system::CTimeLoggerEntry tle1(profiler_, "align.1_prepare");
     // Reset output:
     result = Results();
 
@@ -62,19 +68,33 @@ void ICP::align(
         currentLog->icpParameters              = p;
     }
 
+    tle1.stop();
+
     // ------------------------------------------------------
     // Main ICP loop
     // ------------------------------------------------------
+    mrpt::system::CTimeLoggerEntry tle2(profiler_, "align.2_create_state");
+
     ICP_State state(pcGlobal, pcLocal);
     if (currentLog) state.log = &currentLog.value();
 
-    state.currentSolution.optimalPose =
-        mrpt::poses::CPose3D(initialGuessLocalWrtGlobal);
-    auto prev_solution = state.currentSolution.optimalPose;
+    tle2.stop();
+
+    const auto initGuess = mrpt::poses::CPose3D(initialGuessLocalWrtGlobal);
+
+    state.currentSolution.optimalPose = initGuess;
+
+    mrpt::poses::CPose3D prev_solution = state.currentSolution.optimalPose;
+    std::optional<mrpt::poses::CPose3D> prev2_solution;  // 2 steps ago
+    std::optional<mrpt::poses::CPose3D> lastCorrection;
+    SolverContext                       sc;
+    sc.prior = prior;
 
     for (result.nIterations = 0; result.nIterations < p.maxIterations;
          result.nIterations++)
     {
+        mrpt::system::CTimeLoggerEntry tle3(profiler_, "align.3_iter");
+
         state.currentIteration = result.nIterations;
 
         // Matchings
@@ -82,45 +102,89 @@ void ICP::align(
         MatchContext mc;
         mc.icpIteration = state.currentIteration;
 
+        mrpt::system::CTimeLoggerEntry tle4(profiler_, "align.3.1_matchers");
+
         state.currentPairings = run_matchers(
             matchers_, state.pcGlobal, state.pcLocal,
             state.currentSolution.optimalPose, mc);
 
+        tle4.stop();
+
         if (state.currentPairings.empty())
         {
             result.terminationReason = IterTermReason::NoPairings;
+            if (p.debugPrintIterationProgress)
+            {
+                printf(
+                    "[ICP] Iter=%3u No pairings!\n",
+                    static_cast<unsigned int>(state.currentIteration));
+            }
             break;
         }
 
         // Optimal relative pose:
         // ---------------------------------------
-        SolverContext sc;
+        mrpt::system::CTimeLoggerEntry tle5(profiler_, "align.3.2_solvers");
+
         sc.icpIteration = state.currentIteration;
         sc.guessRelativePose.emplace(state.currentSolution.optimalPose);
+        sc.currentCorrectionFromInitialGuess =
+            state.currentSolution.optimalPose - initGuess;
+        sc.lastIcpStepIncrement = lastCorrection;
 
         // Compute the optimal pose:
         const bool solvedOk = run_solvers(
             solvers_, state.currentPairings, state.currentSolution, sc);
 
+        tle5.stop();
+
         if (!solvedOk)
         {
             result.terminationReason = IterTermReason::SolverError;
+            if (p.debugPrintIterationProgress)
+            {
+                printf(
+                    "[ICP] Iter=%3u Solver returned false\n",
+                    static_cast<unsigned int>(state.currentIteration));
+            }
             break;
         }
 
         // Updated solution is already in "state.currentSolution".
+        mrpt::system::CTimeLoggerEntry tle6(
+            profiler_, "align.3.3_end_criterions");
 
         // Termination criterion: small delta:
+        auto lambdaCalcIncrs = [](const mrpt::poses::CPose3D& deltaSol)
+            -> std::tuple<double, double> {
+            const mrpt::math::CVectorFixed<double, 6> dSol =
+                mrpt::poses::Lie::SE<3>::log(deltaSol);
+            const double delta_xyz = dSol.blockCopy<3, 1>(0, 0).norm();
+            const double delta_rot = dSol.blockCopy<3, 1>(3, 0).norm();
+            return {delta_xyz, delta_rot};
+        };
+
+        // Keep the minimum step between the current increment, and the
+        // increment from current solution to two timesteps ago. This is to
+        // detect bistable, oscillating solutions.
         const auto deltaSol = state.currentSolution.optimalPose - prev_solution;
-        const mrpt::math::CVectorFixed<double, 6> dSol =
-            mrpt::poses::Lie::SE<3>::log(deltaSol);
-        const double delta_xyz = dSol.blockCopy<3, 1>(0, 0).norm();
-        const double delta_rot = dSol.blockCopy<3, 1>(3, 0).norm();
+        lastCorrection      = deltaSol;  // save for the next solver context
+
+        auto [delta_xyz, delta_rot] = lambdaCalcIncrs(deltaSol);
+
+        if (prev2_solution.has_value())
+        {
+            auto [delta_xyz2, delta_rot2] = lambdaCalcIncrs(
+                state.currentSolution.optimalPose - *prev2_solution);
+
+            mrpt::keep_min(delta_xyz, delta_xyz2);
+            mrpt::keep_min(delta_rot, delta_rot2);
+        }
 
         if (p.debugPrintIterationProgress)
         {
             printf(
-                "[ICP] Iter=%3u Delta_xyz=%9.02e, Delta_rot=%6.03f deg, "
+                "[ICP] Iter=%3u Δt=%9.02e, ΔR=%6.03f deg, "
                 "(xyzypr)=%s pairs=%s\n",
                 static_cast<unsigned int>(state.currentIteration),
                 std::abs(delta_xyz), mrpt::RAD2DEG(std::abs(delta_rot)),
@@ -132,10 +196,19 @@ void ICP::align(
             std::abs(delta_rot) < p.minAbsStep_rot)
         {
             result.terminationReason = IterTermReason::Stalled;
+
+            if (p.debugPrintIterationProgress)
+            {
+                printf(
+                    "[ICP] Iter=%3u Solver stalled.\n",
+                    static_cast<unsigned int>(state.currentIteration));
+            }
+
             break;
         }
 
-        prev_solution = state.currentSolution.optimalPose;
+        prev2_solution = prev_solution;
+        prev_solution  = state.currentSolution.optimalPose;
     }
 
     // ----------------------------
@@ -145,9 +218,13 @@ void ICP::align(
         result.terminationReason = IterTermReason::MaxIterations;
 
     // Quality:
+    mrpt::system::CTimeLoggerEntry tle7(profiler_, "align.4_quality");
+
     result.quality = evaluate_quality(
         quality_evaluators_, pcGlobal, pcLocal,
         state.currentSolution.optimalPose, state.currentPairings);
+
+    tle7.stop();
 
     // Store output:
     result.optimal_tf.mean = state.currentSolution.optimalPose;
@@ -163,6 +240,8 @@ void ICP::align(
     // ----------------------------
     // Log records
     // ----------------------------
+    mrpt::system::CTimeLoggerEntry tle8(profiler_, "align.5_save_log");
+
     // Store results into log struct:
     if (currentLog) currentLog->icpResult = result;
 
@@ -187,9 +266,13 @@ void ICP::save_log_file(const LogRecord& log, const Parameters& p)
     static std::mutex   counterMtx;
     unsigned int        RECORD_UNIQUE_ID;
     {
-        counterMtx.lock();
+        auto lck = mrpt::lockHelper(counterMtx);
+
         RECORD_UNIQUE_ID = logFileCounter++;
-        counterMtx.unlock();
+
+        if (p.decimationDebugFiles > 1 &&
+            (RECORD_UNIQUE_ID % p.decimationDebugFiles) != 0)
+            return;  // skip due to decimation
     }
 
     std::string filename = p.debugFileNameFormat;
@@ -205,8 +288,8 @@ void ICP::save_log_file(const LogRecord& log, const Parameters& p)
         const auto        value = mrpt::format(
             "%05u", static_cast<unsigned int>(
                         (log.pcGlobal && log.pcGlobal->id.has_value())
-                            ? log.pcGlobal->id.value()
-                            : 0));
+                                   ? log.pcGlobal->id.value()
+                                   : 0));
         filename = std::regex_replace(filename, std::regex(expr), value);
     }
 
@@ -222,16 +305,16 @@ void ICP::save_log_file(const LogRecord& log, const Parameters& p)
         const auto        value = mrpt::format(
             "%05u", static_cast<unsigned int>(
                         (log.pcLocal && log.pcLocal->id.has_value())
-                            ? log.pcLocal->id.value()
-                            : 0));
+                                   ? log.pcLocal->id.value()
+                                   : 0));
         filename = std::regex_replace(filename, std::regex(expr), value);
     }
 
     {
         const std::string expr = "\\$LOCAL_LABEL";
         const auto value       = (log.pcLocal && log.pcLocal->label.has_value())
-                               ? log.pcLocal->label.value()
-                               : ""s;
+                                     ? log.pcLocal->label.value()
+                                     : ""s;
         filename = std::regex_replace(filename, std::regex(expr), value);
     }
 
