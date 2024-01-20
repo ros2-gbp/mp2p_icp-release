@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -55,6 +55,11 @@ struct Parameters : public mrpt::serialization::CSerializable
      * \sa debugFileNameFormat
      */
     bool generateDebugFiles = false;
+
+    /** If set to N>1, only 1 out of N log files will be actually generated.
+     *  Useful to save tons of disk space for large datasets (!).
+     */
+    uint32_t decimationDebugFiles = 1;
 
     /** Generated files format, if generateDebugFiles is true. */
     std::string debugFileNameFormat =
