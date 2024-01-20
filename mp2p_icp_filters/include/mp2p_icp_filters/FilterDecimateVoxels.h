@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -15,11 +15,13 @@
 #include <mp2p_icp/metricmap.h>
 #include <mp2p_icp_filters/FilterBase.h>
 #include <mp2p_icp_filters/PointCloudToVoxelGrid.h>
+#include <mp2p_icp_filters/PointCloudToVoxelGridSingle.h>
 #include <mrpt/maps/CPointsMap.h>
 
 namespace mp2p_icp_filters
 {
-/** Builds a new layer with a decimated version of an input layer.
+/** Builds a new layer with a decimated version of one or more input layers,
+ * merging their contents.
  *
  * This builds a voxel grid from the input point cloud, and then takes either,
  * the mean of the points in the voxel, or one of the points picked at random,
@@ -27,6 +29,9 @@ namespace mp2p_icp_filters
  *
  * If the given output pointcloud layer already exists, new points will be
  * appended, without clearing the former contents.
+ *
+ * If the parameter `flatten_to` is defined, this filter will also "flatten" or
+ * "summarize" the 3D points into a 2D planar (constant height `z`) cloud.
  *
  * Not compatible with calling from different threads simultaneously for
  * different input point clouds. Use independent instances for each thread if
@@ -48,10 +53,13 @@ class FilterDecimateVoxels : public mp2p_icp_filters::FilterBase
 
     struct Parameters
     {
-        void load_from_yaml(const mrpt::containers::yaml& c);
+        void load_from_yaml(
+            const mrpt::containers::yaml& c, FilterDecimateVoxels& parent);
 
-        std::string input_pointcloud_layer =
-            mp2p_icp::metric_map_t::PT_LAYER_RAW;
+        /** One or more input layers, from which to read (and merge) input
+         * points */
+        std::vector<std::string> input_pointcloud_layer = {
+            mp2p_icp::metric_map_t::PT_LAYER_RAW};
 
         /** Whether to throw an exception if the input layer does not exist, or,
          * otherwise, it should be silently ignored producing an empty output.
@@ -62,28 +70,40 @@ class FilterDecimateVoxels : public mp2p_icp_filters::FilterBase
         std::string output_pointcloud_layer;
 
         /** Size of each voxel edge [meters] */
-        double voxel_filter_resolution = .20;  // [m]
+        double voxel_filter_resolution = 1.0;  // [m]
+
+        /// See description on top of this page.
+        std::optional<double> flatten_to;
+
+        // TODO: Convert into an enum !!
 
         /** If enabled, the mean of each voxel is taken instead of any of
          *  the original points. */
         bool use_voxel_average = false;
 
-        /**
-         * YAML loading format:
-         * \code
-         * bounding_box_min: [-10, -10, -5]
-         * bounding_box_max: [ 10,  10,  5]
-         * \endcode
-         */
-        mrpt::math::TBoundingBoxf bounding_box = {
-            {-10.0f, -10.0f, -5.0f}, {10.0f, 10.0f, 5.0f}};
+        /** If enabled, the *actual* data point closest to the mean of each
+         * voxel is taken as representative for each voxel. */
+        bool use_closest_to_voxel_average = false;
+
+        /** If false (default), the first point in each voxel will be returned
+         * as voxel representative. Otherwise, one picked at random. */
+        bool use_random_point_within_voxel = false;
     };
 
     /** Algorithm parameters */
     Parameters params_;
 
    private:
-    mutable PointCloudToVoxelGrid filter_grid_;
+    mutable std::optional<PointCloudToVoxelGrid>       filter_grid_;
+    mutable std::optional<PointCloudToVoxelGridSingle> filter_grid_single_;
+
+    bool useSingleGrid() const
+    {
+        return !(
+            params_.use_closest_to_voxel_average ||
+            params_.use_random_point_within_voxel ||  //
+            params_.use_voxel_average);
+    }
 };
 
 /** @} */

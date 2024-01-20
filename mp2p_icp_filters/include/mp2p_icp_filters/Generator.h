@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <mp2p_icp/Parameterizable.h>
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/maps/CPointsMap.h>
@@ -41,23 +42,22 @@ struct NotImplementedError : public std::runtime_error
 
 /** Generic base class providing process(), converting a generic
  *  mrpt::obs::CObservation into a metric_map_t with just a point cloud layer
- (named `raw`).
+ *  (named `raw`).
  *
- * This pointcloud-t can optionally then be passed through one or more
- FilterBase
- * implementations to detect features, decimate it, etc.
+ * This metric_map_t can optionally then be passed through one or more
+ * FilterBase implementations to detect features, decimate it, etc.
  *
  * Specializations of Generator may exist and could be implemented to exploit
  * the structured information in the original CObservation data to be more
  * efficient in detecting features (e.g. corners, etc.).
 
- * Internally, fifferent signatures exists for:
+ * Internally, different signatures exists for:
  * - 2D LiDAR range scans (mrpt::obs::CObservation2DRangeScan)
  * - 3D Velodyne scans (mrpt::obs::CObservationVelodyneScan)
  * - 3D RGBD camera images (mrpt::obs::CObservation3DRangeScan)
  * - Generic 2D/3D point clouds (mrpt::obs::CObservationPointCloud)
  * - Generic multi-beam rotating (or flash) Lidars
- (mrpt::obs::CObservationRotatingScan)
+ *   (mrpt::obs::CObservationRotatingScan)
  *
  * Derived classes may implement all or only one of those methods. An
  * exception NotImplementedError will be thrown if an non-implemented method is
@@ -70,7 +70,8 @@ struct NotImplementedError : public std::runtime_error
  *
  */
 class Generator : public mrpt::rtti::CObject,  // RTTI support
-                  public mrpt::system::COutputLogger  // Logging support
+                  public mrpt::system::COutputLogger,  // Logging support
+                  public mp2p_icp::Parameterizable  // Dynamic parameters
 {
     DEFINE_MRPT_OBJECT(Generator, mp2p_icp_filters)
 
@@ -92,17 +93,32 @@ class Generator : public mrpt::rtti::CObject,  // RTTI support
      * virtual method
      */
     virtual void process(
-        const mrpt::obs::CObservation& input_raw,
-        mp2p_icp::metric_map_t&        inOut) const;
+        const mrpt::obs::CObservation& input_raw, mp2p_icp::metric_map_t& inOut,
+        const std::optional<mrpt::poses::CPose3D>& robotPose =
+            std::nullopt) const;
 
     struct Parameters
     {
         void load_from_yaml(const mrpt::containers::yaml& c);
 
-        /** The point cloud points layer name where the observation will be
-         * loaded. Default: "raw" */
-        std::string target_pointcloud_layer =
-            mp2p_icp::metric_map_t::PT_LAYER_RAW;
+        /** The map layer name where the observation will be loaded into.
+         *  Default: "raw" */
+        std::string target_layer = mp2p_icp::metric_map_t::PT_LAYER_RAW;
+
+        /** If empty (default), a point cloud layer will be generated of type
+         *  mrpt::maps::CSimplePointCloud, and the observation will be inserted
+         * via the virtual method mrpt::maps::CMetricMap::insertObservation()
+         *
+         *
+         * Alternatively, a path to a .INI file can be provided here, with
+         * a custom metric map class can be defined via a
+         * mrpt::maps::CMultiMetricMap initializer list.
+         * If the CMultiMetricMap defines multiple metric maps, the first one
+         * only will be taken to generate the new layer.
+         *
+         * Refer to example files.
+         */
+        std::string metric_map_definition_ini_file;
 
         /** Sensor observation class names to process. Default = ".*" (any).
          *  Example: use "mrpt::obs::CObservation2DRangeScan" if you only want
@@ -126,23 +142,29 @@ class Generator : public mrpt::rtti::CObject,  // RTTI support
     // To be overrided in derived classes, if implemented:
     /** Process a 2D lidar scan. \return false if not implemented */
     virtual bool filterScan2D(
-        const mrpt::obs::CObservation2DRangeScan& pc,
-        mp2p_icp::metric_map_t&                   out) const;
+        const mrpt::obs::CObservation2DRangeScan&  pc,
+        mp2p_icp::metric_map_t&                    out,
+        const std::optional<mrpt::poses::CPose3D>& robotPose) const;
     /** Process a depth camera observation. \return false if not implemented */
     virtual bool filterScan3D(
-        const mrpt::obs::CObservation3DRangeScan& pc,
-        mp2p_icp::metric_map_t&                   out) const;
+        const mrpt::obs::CObservation3DRangeScan&  pc,
+        mp2p_icp::metric_map_t&                    out,
+        const std::optional<mrpt::poses::CPose3D>& robotPose) const;
     /** Process a 3D lidar scan. \return false if not implemented   */
     virtual bool filterVelodyneScan(
         const mrpt::obs::CObservationVelodyneScan& pc,
-        mp2p_icp::metric_map_t&                    out) const;
+        mp2p_icp::metric_map_t&                    out,
+        const std::optional<mrpt::poses::CPose3D>& robotPose) const;
     /** Process a 2D/3D point-cloud. \return false if not implemented  */
     virtual bool filterPointCloud(
-        const mrpt::maps::CPointsMap& pc, mp2p_icp::metric_map_t& out) const;
+        const mrpt::maps::CPointsMap& pc,
+        const mrpt::poses::CPose3D& sensorPose, mp2p_icp::metric_map_t& out,
+        const std::optional<mrpt::poses::CPose3D>& robotPose) const;
     /** Process a 3D lidar scan. \return false if not implemented   */
     virtual bool filterRotatingScan(
         const mrpt::obs::CObservationRotatingScan& pc,
-        mp2p_icp::metric_map_t&                    out) const;
+        mp2p_icp::metric_map_t&                    out,
+        const std::optional<mrpt::poses::CPose3D>& robotPose) const;
 
     bool       initialized_ = false;
     std::regex process_class_names_regex_;
@@ -161,27 +183,31 @@ using GeneratorSet = std::vector<Generator::Ptr>;
  */
 void apply_generators(
     const GeneratorSet& generators, const mrpt::obs::CObservation& obs,
-    mp2p_icp::metric_map_t& output);
+    mp2p_icp::metric_map_t&                    output,
+    const std::optional<mrpt::poses::CPose3D>& robotPose = std::nullopt);
 
 /// \overload (functional version returning the metric_map_t)
-mp2p_icp::metric_map_t apply_generators(
-    const GeneratorSet& generators, const mrpt::obs::CObservation& obs);
+[[nodiscard]] mp2p_icp::metric_map_t apply_generators(
+    const GeneratorSet& generators, const mrpt::obs::CObservation& obs,
+    const std::optional<mrpt::poses::CPose3D>& robotPose = std::nullopt);
 
 /// \overload (version with an input CSensoryFrame)
 void apply_generators(
     const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf,
-    mp2p_icp::metric_map_t& output);
+    mp2p_icp::metric_map_t&                    output,
+    const std::optional<mrpt::poses::CPose3D>& robotPose = std::nullopt);
 
 /// \overload (functional version returning the metric_map_t)
-mp2p_icp::metric_map_t apply_generators(
-    const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf);
+[[nodiscard]] mp2p_icp::metric_map_t apply_generators(
+    const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf,
+    const std::optional<mrpt::poses::CPose3D>& robotPose = std::nullopt);
 
 /** Creates a set of generators from a YAML configuration block (a sequence).
  *  Returns an empty generators set for an empty or null yaml node.
  *  Refer to YAML file examples.
  *  Returned generators are already initialize()'d.
  */
-GeneratorSet generators_from_yaml(
+[[nodiscard]] GeneratorSet generators_from_yaml(
     const mrpt::containers::yaml&       c,
     const mrpt::system::VerbosityLevel& vLevel = mrpt::system::LVL_INFO);
 
@@ -192,7 +218,7 @@ GeneratorSet generators_from_yaml(
  *  Refer to YAML file examples.
  *  Returned generators are already initialize()'d.
  */
-GeneratorSet generators_from_yaml_file(
+[[nodiscard]] GeneratorSet generators_from_yaml_file(
     const std::string&                  filename,
     const mrpt::system::VerbosityLevel& vLevel = mrpt::system::LVL_INFO);
 

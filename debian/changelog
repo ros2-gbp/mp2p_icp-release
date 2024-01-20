@@ -1,8 +1,0 @@
-ros-rolling-mp2p-icp (0.1.0-1jammy) jammy; urgency=high
-
-  * First official release of the mp2p_icp libraries
-  * Contributors: FranciscoJManasAlvarez, Jose Luis Blanco-Claraco
-
- -- Jose-Luis Blanco-Claraco <joseluisblancoc@gmail.com>  Tue, 13 Jun 2023 22:00:00 -0000
-
-
