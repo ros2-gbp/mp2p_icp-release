@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -101,6 +101,9 @@ static TCLAP::SwitchArg argGenerateDebugFiles(
     "visualization with mp2p-icp-log-viewer, overriding the "
     "`generateDebugFiles` value in the configuration YAML file.",
     cmd);
+
+static TCLAP::SwitchArg argProfile(
+    "", "profiler", "Enables the ICP profiler.", cmd);
 
 // To avoid reading the same .rawlog file twice:
 static std::map<std::string, mrpt::obs::CRawlog::Ptr> rawlogsCache;
@@ -304,6 +307,8 @@ void runIcp()
                       << std::endl;
         }
     }
+
+    if (argProfile.isSet()) icp->profiler().enable(true);
 
     const double t_ini = mrpt::Clock::nowDouble();
 

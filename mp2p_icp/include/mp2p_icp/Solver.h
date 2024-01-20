@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -13,17 +13,22 @@
 
 #include <mp2p_icp/OptimalTF_Result.h>
 #include <mp2p_icp/Pairings.h>
+#include <mp2p_icp/Parameterizable.h>
 #include <mp2p_icp/WeightParameters.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/poses/CPose3D.h>
+#include <mrpt/poses/CPose3DPDFGaussianInf.h>
 #include <mrpt/rtti/CObject.h>
 #include <mrpt/system/COutputLogger.h>
 
+#include <any>
 #include <optional>
 
 namespace mp2p_icp
 {
-/** Defines the context of a match operation.
+class Solver;
+
+/** Defines the context of a solver within the successive ICP iterations.
  *
  * \ingroup mp2p_icp_grp
  */
@@ -31,8 +36,22 @@ struct SolverContext
 {
     SolverContext() = default;
 
-    std::optional<uint32_t>             icpIteration;
     std::optional<mrpt::poses::CPose3D> guessRelativePose;
+    std::optional<mrpt::poses::CPose3D> currentCorrectionFromInitialGuess;
+    std::optional<mrpt::poses::CPose3D> lastIcpStepIncrement;
+
+    /** Optional prior guess of the SE(3) solution, including a mean value
+     *  and an inverse covariance (information) matrix, i.e. zeros in the
+     * diagonal mean that those prior coordinates should be ignored, a large
+     * value means the solution must be close to those coordinates.
+     */
+    std::optional<mrpt::poses::CPose3DPDFGaussianInf> prior;
+
+    // room for optional solver-specific context:
+    mutable std::map<const Solver*, std::map<std::string, std::any>>
+        perSolverPersistentData;
+
+    std::optional<uint32_t> icpIteration;
 };
 
 /** Virtual base class for optimal alignment solvers (one step in ICP).
@@ -43,7 +62,9 @@ struct SolverContext
  *
  * \ingroup mp2p_icp_grp
  */
-class Solver : public mrpt::system::COutputLogger, public mrpt::rtti::CObject
+class Solver : public mrpt::system::COutputLogger,
+               public mrpt::rtti::CObject,
+               public mp2p_icp::Parameterizable
 {
     DEFINE_VIRTUAL_MRPT_OBJECT(Solver)
 
@@ -63,6 +84,11 @@ class Solver : public mrpt::system::COutputLogger, public mrpt::rtti::CObject
 
     uint32_t runFromIteration = 0;
     uint32_t runUpToIteration = 0;  //!< 0: no limit
+
+    double runUntilTranslationCorrectionSmallerThan = 0;
+
+    /** Can be used to disable one of a set of solvers in a pipeline */
+    bool enabled = true;
 
    protected:
     virtual bool impl_optimal_pose(

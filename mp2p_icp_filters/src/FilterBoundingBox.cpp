@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -12,10 +12,7 @@
 
 #include <mp2p_icp_filters/FilterBoundingBox.h>
 #include <mrpt/containers/yaml.h>
-#include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/math/ops_containers.h>  // dotProduct
-#include <mrpt/obs/CObservation2DRangeScan.h>
-#include <mrpt/random/RandomGenerators.h>
 
 IMPLEMENTS_MRPT_OBJECT(
     FilterBoundingBox, mp2p_icp_filters::FilterBase, mp2p_icp_filters)
@@ -23,11 +20,16 @@ IMPLEMENTS_MRPT_OBJECT(
 using namespace mp2p_icp_filters;
 
 void FilterBoundingBox::Parameters::load_from_yaml(
-    const mrpt::containers::yaml& c)
+    const mrpt::containers::yaml& c, FilterBoundingBox& parent)
 {
     MCP_LOAD_OPT(c, input_pointcloud_layer);
-    MCP_LOAD_REQ(c, output_pointcloud_layer);
-    MCP_LOAD_REQ(c, keep_bbox_contents);
+    MCP_LOAD_OPT(c, inside_pointcloud_layer);
+    MCP_LOAD_OPT(c, outside_pointcloud_layer);
+
+    ASSERTMSG_(
+        !inside_pointcloud_layer.empty() || !outside_pointcloud_layer.empty(),
+        "At least one 'inside_pointcloud_layer' or "
+        "'outside_pointcloud_layer' must be provided.");
 
     ASSERT_(
         c.has("bounding_box_min") && c["bounding_box_min"].isSequence() &&
@@ -36,24 +38,29 @@ void FilterBoundingBox::Parameters::load_from_yaml(
         c.has("bounding_box_max") && c["bounding_box_max"].isSequence() &&
         c["bounding_box_max"].asSequence().size() == 3);
 
-    const auto bboxMin = c["bounding_box_min"].toStdVector<double>();
-    const auto bboxMax = c["bounding_box_max"].toStdVector<double>();
+    const auto bboxMin = c["bounding_box_min"].asSequence();
+    const auto bboxMax = c["bounding_box_max"].asSequence();
 
     for (int i = 0; i < 3; i++)
     {
-        bounding_box.min[i] = bboxMin.at(i);
-        bounding_box.max[i] = bboxMax.at(i);
+        parent.parseAndDeclareParameter(
+            bboxMin.at(i).as<std::string>(), bounding_box.min[i]);
+        parent.parseAndDeclareParameter(
+            bboxMax.at(i).as<std::string>(), bounding_box.max[i]);
     }
 }
 
-FilterBoundingBox::FilterBoundingBox() = default;
+FilterBoundingBox::FilterBoundingBox()
+{
+    mrpt::system::COutputLogger::setLoggerName("FilterBoundingBox");
+}
 
 void FilterBoundingBox::initialize(const mrpt::containers::yaml& c)
 {
     MRPT_START
 
     MRPT_LOG_DEBUG_STREAM("Loading these params:\n" << c);
-    params_.load_from_yaml(c);
+    params_.load_from_yaml(c, *this);
 
     MRPT_END
 }
@@ -71,27 +78,22 @@ void FilterBoundingBox::filter(mp2p_icp::metric_map_t& inOut) const
 
     const auto& pc = *pcPtr;
 
-    // Out:
-    ASSERT_(!params_.output_pointcloud_layer.empty());
-
     // Create if new: Append to existing layer, if already existed.
-    mrpt::maps::CPointsMap::Ptr outPc;
-    if (auto itLy = inOut.layers.find(params_.output_pointcloud_layer);
-        itLy != inOut.layers.end())
-    {
-        outPc = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(itLy->second);
-        if (!outPc)
-            THROW_EXCEPTION_FMT(
-                "Layer '%s' must be of point cloud type.",
-                params_.output_pointcloud_layer.c_str());
-    }
-    else
-    {
-        outPc = mrpt::maps::CSimplePointsMap::Create();
-        inOut.layers[params_.output_pointcloud_layer] = outPc;
-    }
+    mrpt::maps::CPointsMap* insidePc = GetOrCreatePointLayer(
+        inOut, params_.inside_pointcloud_layer,
+        true /*allow empty for nullptr*/,
+        /* create cloud of the same type */
+        pcPtr->GetRuntimeClass()->className);
 
-    outPc->reserve(outPc->size() + pc.size() / 10);
+    if (insidePc) insidePc->reserve(insidePc->size() + pc.size() / 10);
+
+    mrpt::maps::CPointsMap* outsidePc = GetOrCreatePointLayer(
+        inOut, params_.outside_pointcloud_layer,
+        true /*allow empty for nullptr*/,
+        /* create cloud of the same type */
+        pcPtr->GetRuntimeClass()->className);
+
+    if (outsidePc) outsidePc->reserve(outsidePc->size() + pc.size() / 10);
 
     const auto& xs = pc.getPointsBufferRef_x();
     const auto& ys = pc.getPointsBufferRef_y();
@@ -102,12 +104,9 @@ void FilterBoundingBox::filter(mp2p_icp::metric_map_t& inOut) const
         const bool isInside =
             params_.bounding_box.containsPoint({xs[i], ys[i], zs[i]});
 
-        if ((isInside && !params_.keep_bbox_contents) ||
-            (!isInside && params_.keep_bbox_contents))
-            continue;  // remove this point.
+        auto* targetPc = isInside ? insidePc : outsidePc;
 
-        // Otherwise, add it:
-        outPc->insertPointFast(xs[i], ys[i], zs[i]);
+        if (targetPc) targetPc->insertPointFrom(pc, i);
     }
 
     MRPT_END

@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -37,6 +37,8 @@ class ICP_LibPointmatcher : public ICP
         const metric_map_t& pcLocal, const metric_map_t& pcGlobal,
         const mrpt::math::TPose3D& initialGuessLocalWrtGlobal,
         const Parameters& p, Results& result,
+        const std::optional<mrpt::poses::CPose3DPDFGaussianInf>& prior =
+            std::nullopt,
         const mrpt::optional_ref<LogRecord>& outputDebugInfo =
             std::nullopt) override;
 
