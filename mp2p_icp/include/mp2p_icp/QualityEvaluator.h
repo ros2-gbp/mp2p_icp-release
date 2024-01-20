@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -12,6 +12,7 @@
 #pragma once
 
 #include <mp2p_icp/Pairings.h>
+#include <mp2p_icp/Parameterizable.h>
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/rtti/CObject.h>
@@ -24,7 +25,8 @@ namespace mp2p_icp
  * \ingroup mp2p_icp_grp
  */
 class QualityEvaluator : public mrpt::system::COutputLogger,
-                         public mrpt::rtti::CObject
+                         public mrpt::rtti::CObject,
+                         public mp2p_icp::Parameterizable
 {
     DEFINE_VIRTUAL_MRPT_OBJECT(QualityEvaluator)
 

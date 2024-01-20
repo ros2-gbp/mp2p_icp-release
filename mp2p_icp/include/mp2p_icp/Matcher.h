@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -12,7 +12,9 @@
 #pragma once
 
 #include <mp2p_icp/Pairings.h>
+#include <mp2p_icp/Parameterizable.h>
 #include <mp2p_icp/metricmap.h>
+#include <mp2p_icp/pointcloud_bitfield.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/rtti/CObject.h>
 #include <mrpt/system/COutputLogger.h>
@@ -67,7 +69,9 @@ struct MatchState
  *
  * \ingroup mp2p_icp_grp
  */
-class Matcher : public mrpt::system::COutputLogger, public mrpt::rtti::CObject
+class Matcher : public mrpt::system::COutputLogger,
+                public mrpt::rtti::CObject,
+                public mp2p_icp::Parameterizable
 {
     DEFINE_VIRTUAL_MRPT_OBJECT(Matcher)
 
@@ -86,6 +90,7 @@ class Matcher : public mrpt::system::COutputLogger, public mrpt::rtti::CObject
 
     uint32_t runFromIteration = 0;
     uint32_t runUpToIteration = 0;  //!< 0: no limit
+    bool     enabled          = true;
 
    protected:
     /// \return true if the mather is actually invoked, false if disabled.

@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *   A Modular Optimization framework for Localization and mApping  (MOLA)
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -133,6 +133,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                     mp2p_icp::Matcher_Points_DistanceThreshold::Create();
                 mrpt::containers::yaml p2;
                 p2["threshold"]                      = 0.1;
+                p2["thresholdAngularDeg"]            = .0;
                 p2["allowMatchAlreadyMatchedPoints"] = true;
                 mPt2Pt->initialize(p2);
 
@@ -153,6 +154,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                     mp2p_icp::Matcher_Points_DistanceThreshold::Create();
                 mrpt::containers::yaml p2;
                 p2["threshold"]                      = 0.1;
+                p2["thresholdAngularDeg"]            = .0;
                 p2["allowMatchAlreadyMatchedPoints"] = false;
                 mPt2Pt->initialize(p2);
 
