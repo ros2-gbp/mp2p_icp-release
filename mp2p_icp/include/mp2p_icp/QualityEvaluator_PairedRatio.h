@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -28,6 +28,7 @@ class QualityEvaluator_PairedRatio : public QualityEvaluator
     /** See base class. Parameters:
      *
      * \code
+     * reuse_icp_pairings: true # Default=true (thresholdDistance is ignored)
      * thresholdDistance: 0.10
      * \endcode
      */
@@ -40,6 +41,7 @@ class QualityEvaluator_PairedRatio : public QualityEvaluator
 
    private:
     Matcher_Points_DistanceThreshold matcher_;
+    bool                             reuse_icp_pairings = true;
 };
 
 }  // namespace mp2p_icp
