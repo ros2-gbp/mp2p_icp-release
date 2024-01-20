@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -80,18 +80,16 @@ double QualityEvaluator_Voxels::evaluate(
             return 0;
         }
 
-        auto ptsG =
-            std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(itG->second);
-        auto ptsL =
-            std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(itL->second);
+        auto ptsG = mp2p_icp::MapToPointsMap(*itG->second);
+        auto ptsL = mp2p_icp::MapToPointsMap(*itL->second);
         ASSERT_(ptsG);
         ASSERT_(ptsL);
 
         mrpt::maps::CSimplePointsMap localTransformed;
-        localTransformed.insertAnotherMap(ptsL.get(), localPose);
+        localTransformed.insertAnotherMap(ptsL, localPose);
 
         // resize voxel grids?
-        MRPT_TODO("Check against current size too, for many layers");
+        // TODO(jlbc): Check against current size too, for many layers
         {
             const auto bb = ptsG->boundingBox();
             voxelsGlo.resizeGrid(bb.min, bb.max);
