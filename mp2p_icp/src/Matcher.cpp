@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -19,8 +19,9 @@ using namespace mp2p_icp;
 
 void Matcher::initialize(const mrpt::containers::yaml& params)
 {
-    runFromIteration = params.getOrDefault<uint32_t>("runFromIteration", 0);
-    runUpToIteration = params.getOrDefault<uint32_t>("runUpToIteration", 0);
+    MCP_LOAD_OPT(params, runFromIteration);
+    MCP_LOAD_OPT(params, runUpToIteration);
+    MCP_LOAD_OPT(params, enabled);
 }
 
 bool Matcher::match(
@@ -28,6 +29,7 @@ bool Matcher::match(
     const mrpt::poses::CPose3D& localPose, const MatchContext& mc,
     MatchState& ms, Pairings& out) const
 {
+    if (!enabled) return false;
     if (mc.icpIteration < runFromIteration) return false;
     if (runUpToIteration > 0 && mc.icpIteration > runUpToIteration)
         return false;

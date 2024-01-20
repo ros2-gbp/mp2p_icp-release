@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -20,6 +20,10 @@
 namespace mp2p_icp_filters
 {
 /** Accepts as input a point cloud, and classifies points into edges and planes.
+ *
+ * Based on the LOAM paper (Zhang, Ji, and Sanjiv Singh. "LOAM: Lidar odometry
+ * and mapping in real-time." Robotics: Science and systems. Vol. 2. No. 9.
+ * 2014.).
  *
  * Not compatible with calling from different threads simultaneously for
  * different input point clouds. Use independent instances for each thread if
@@ -57,13 +61,6 @@ class FilterEdgesPlanes : public mp2p_icp_filters::FilterBase
         float        voxel_filter_min_e2_e0  = 100.f;
         float        voxel_filter_min_e1_e0  = 100.f;
         float        voxel_filter_min_e1     = .0f;
-
-        float init_extension_min_x = -10.0f;
-        float init_extension_min_y = -10.0f;
-        float init_extension_min_z = -10.0f;
-        float init_extension_max_x = 10.0f;
-        float init_extension_max_y = 10.0f;
-        float init_extension_max_z = 10.0f;
     };
 
     /** Algorithm parameters */

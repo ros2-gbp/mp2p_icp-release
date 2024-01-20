@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -50,10 +50,11 @@ class Matcher_Points_DistanceThreshold : public Matcher_Points_Base
      */
     void initialize(const mrpt::containers::yaml& params) override;
 
-   private:
-    double       threshold        = 0.50;
-    unsigned int pairingsPerPoint = 1;
+    double   threshold           = 0.50;  // m
+    double   thresholdAngularDeg = 0.50;  // deg
+    uint32_t pairingsPerPoint    = 1;
 
+   private:
     void implMatchOneLayer(
         const mrpt::maps::CMetricMap& pcGlobal,
         const mrpt::maps::CPointsMap& pcLocal,
