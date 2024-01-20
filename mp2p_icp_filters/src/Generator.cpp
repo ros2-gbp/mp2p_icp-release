@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -11,7 +11,9 @@
  */
 
 #include <mp2p_icp_filters/Generator.h>
+#include <mrpt/config/CConfigFile.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/maps/CMultiMetricMap.h>
 #include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/obs/CObservation2DRangeScan.h>
 #include <mrpt/obs/CObservation3DRangeScan.h>
@@ -19,7 +21,7 @@
 #include <mrpt/obs/CObservationRotatingScan.h>
 #include <mrpt/obs/CObservationVelodyneScan.h>
 #include <mrpt/obs/CSensoryFrame.h>
-#include <mrpt/version.h>
+#include <mrpt/system/filesystem.h>
 
 IMPLEMENTS_MRPT_OBJECT(Generator, mrpt::rtti::CObject, mp2p_icp_filters)
 
@@ -29,7 +31,8 @@ Generator::Generator() : mrpt::system::COutputLogger("Generator") {}
 
 void Generator::Parameters::load_from_yaml(const mrpt::containers::yaml& c)
 {
-    MCP_LOAD_OPT(c, target_pointcloud_layer);
+    MCP_LOAD_OPT(c, target_layer);
+    MCP_LOAD_OPT(c, metric_map_definition_ini_file);
     MCP_LOAD_OPT(c, process_class_names_regex);
     MCP_LOAD_OPT(c, process_sensor_labels_regex);
     MCP_LOAD_OPT(c, throw_on_unhandled_observation_class);
@@ -51,7 +54,8 @@ void Generator::initialize(const mrpt::containers::yaml& c)
 }
 
 void Generator::process(
-    const mrpt::obs::CObservation& o, mp2p_icp::metric_map_t& out) const
+    const mrpt::obs::CObservation& o, mp2p_icp::metric_map_t& out,
+    const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     MRPT_START
     using namespace mrpt::obs;
@@ -62,30 +66,49 @@ void Generator::process(
 
     const auto obsClassName = o.GetRuntimeClass()->className;
 
-    // user-given filters:
-    if (!std::regex_match(obsClassName, process_class_names_regex_)) return;
-    if (!std::regex_match(o.sensorLabel, process_sensor_labels_regex_)) return;
+    MRPT_LOG_DEBUG_FMT(
+        "Processing observation type='%s' label='%s'", obsClassName,
+        o.sensorLabel.c_str());
 
-    bool processed = false;
-
-    if (auto o0 = dynamic_cast<const CObservationPointCloud*>(&o); o0)
+    // default: use point clouds:
+    if (params_.metric_map_definition_ini_file.empty())
     {
-        ASSERT_(o0->pointcloud);
-        processed = filterPointCloud(*o0->pointcloud, out);
-    }
-    else if (auto o1 = dynamic_cast<const CObservation2DRangeScan*>(&o); o1)
-        processed = filterScan2D(*o1, out);
-    else if (auto o2 = dynamic_cast<const CObservation3DRangeScan*>(&o); o2)
-        processed = filterScan3D(*o2, out);
-    else if (auto o3 = dynamic_cast<const CObservationVelodyneScan*>(&o); o3)
-        processed = filterVelodyneScan(*o3, out);
+        bool processed = false;
 
-    // done?
-    if (!processed)
-    {
+        // user-given filters: Done *AFTER* creating the map, if needed.
+        if (!std::regex_match(obsClassName, process_class_names_regex_)) return;
+        if (!std::regex_match(o.sensorLabel, process_sensor_labels_regex_))
+            return;
+
+        // load lazy-load from disk:
+        o.load();
+
+        if (auto oRS = dynamic_cast<const CObservationRotatingScan*>(&o); oRS)
+            processed = filterRotatingScan(*oRS, out, robotPose);
+        else if (auto o0 = dynamic_cast<const CObservationPointCloud*>(&o); o0)
+        {
+            ASSERT_(o0->pointcloud);
+            processed = filterPointCloud(
+                *o0->pointcloud, o0->sensorPose, out, robotPose);
+        }
+        else if (auto o1 = dynamic_cast<const CObservation2DRangeScan*>(&o); o1)
+            processed = filterScan2D(*o1, out, robotPose);
+        else if (auto o2 = dynamic_cast<const CObservation3DRangeScan*>(&o); o2)
+            processed = filterScan3D(*o2, out, robotPose);
+        else if (auto o3 = dynamic_cast<const CObservationVelodyneScan*>(&o);
+                 o3)
+            processed = filterVelodyneScan(*o3, out, robotPose);
+
+        // done?
+        if (processed)
+        {
+            // o.unload();  // DON'T! We don't know who else is using the data
+            return;  // we are done.
+        }
+
         // Create if new: Append to existing layer, if already existed.
         mrpt::maps::CPointsMap::Ptr outPc;
-        if (auto itLy = out.layers.find(params_.target_pointcloud_layer);
+        if (auto itLy = out.layers.find(params_.target_layer);
             itLy != out.layers.end())
         {
             outPc =
@@ -93,18 +116,17 @@ void Generator::process(
             if (!outPc)
                 THROW_EXCEPTION_FMT(
                     "Layer '%s' must be of point cloud type.",
-                    params_.target_pointcloud_layer.c_str());
+                    params_.target_layer.c_str());
         }
         else
         {
             outPc = mrpt::maps::CSimplePointsMap::Create();
-            out.layers[params_.target_pointcloud_layer] = outPc;
+            out.layers[params_.target_layer] = outPc;
         }
 
         if (!outPc) outPc = mrpt::maps::CSimplePointsMap::Create();
 
         // Observation format:
-        o.load();
 
         // Special case:
         // unproject 3D points, if needed:
@@ -116,6 +138,7 @@ void Generator::process(
 
             mrpt::obs::T3DPointsProjectionParams pp;
             pp.takeIntoAccountSensorPoseOnRobot = true;
+            pp.robotPoseInTheWorld              = robotPose;
             const_cast<mrpt::obs::CObservation3DRangeScan*>(obs3D)
                 ->unprojectInto(tmpMap, pp);
 
@@ -124,119 +147,184 @@ void Generator::process(
         else
         {
             // General case:
-#if MRPT_VERSION >= 0x240
-            auto& thePc = *outPc;
-#else
-            auto* thePc = outPc.get();
-#endif
-            const bool insertDone = o.insertObservationInto(thePc);
+            const bool insertDone = o.insertObservationInto(*outPc, robotPose);
 
             if (!insertDone && params_.throw_on_unhandled_observation_class)
             {
                 THROW_EXCEPTION_FMT(
                     "Observation of type '%s' could not be converted into a "
                     "point cloud, and none of the specializations handled it, "
-                    "so I "
-                    "do not know what to do with this observation!",
+                    "so I do not know what to do with this observation!",
                     obsClassName);
             }
         }
 
-#if MRPT_VERSION >= 0x233
-        o.unload();
-#else
-        // workaround to mrpt const correctness problem in <= v2.3.2
-        const_cast<mrpt::obs::CObservation&>(o).unload();
-#endif
+        // o.unload();  // DON'T! We don't know who else is using the data
+    }
+    else
+    {
+        // Use a user-defined custom map type:
+
+        // Create if new: Append to existing layer, if already existed.
+        mrpt::maps::CMetricMap::Ptr outMap;
+
+        if (auto itLy = out.layers.find(params_.target_layer);
+            itLy != out.layers.end())
+        {
+            outMap = itLy->second;
+        }
+        else
+        {
+            // insert new layer:
+            ASSERT_FILE_EXISTS_(params_.metric_map_definition_ini_file);
+
+            mrpt::config::CConfigFile cfg(
+                params_.metric_map_definition_ini_file);
+            mrpt::maps::TSetOfMetricMapInitializers mapInits;
+            mapInits.loadFromConfigFile(cfg, "map");
+
+            mrpt::maps::CMultiMetricMap theMap;
+            theMap.setListOfMaps(mapInits);
+
+            ASSERT_(theMap.maps.size() >= 1);
+            outMap = theMap.maps.at(0);
+
+            out.layers[params_.target_layer] = outMap;
+        }
+
+        ASSERT_(outMap);
+
+        // user-given filters: Done *AFTER* creating the map, if needed.
+        if (!std::regex_match(obsClassName, process_class_names_regex_)) return;
+        if (!std::regex_match(o.sensorLabel, process_sensor_labels_regex_))
+            return;
+
+        // Observation format:
+        o.load();
+
+        // General case:
+        const bool insertDone = o.insertObservationInto(*outMap, robotPose);
+
+        if (!insertDone && params_.throw_on_unhandled_observation_class)
+        {
+            THROW_EXCEPTION_FMT(
+                "Observation of type '%s' could not be converted inserted into "
+                "the map of type '%s', so I do not know what to do with this "
+                "observation!",
+                obsClassName, outMap->GetRuntimeClass()->className);
+        }
+
+        // o.unload();  // DON'T! We don't know who else is using the data
     }
 
     MRPT_END
 }
 
 bool Generator::filterScan2D(  //
-    [[maybe_unused]] const mrpt::obs::CObservation2DRangeScan& pc,
-    [[maybe_unused]] mp2p_icp::metric_map_t&                   out) const
+    [[maybe_unused]] const mrpt::obs::CObservation2DRangeScan&  pc,
+    [[maybe_unused]] mp2p_icp::metric_map_t&                    out,
+    [[maybe_unused]] const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     return false;  // Not implemented
 }
 
 bool Generator::filterVelodyneScan(  //
     [[maybe_unused]] const mrpt::obs::CObservationVelodyneScan& pc,
-    [[maybe_unused]] mp2p_icp::metric_map_t&                    out) const
+    [[maybe_unused]] mp2p_icp::metric_map_t&                    out,
+    [[maybe_unused]] const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     return false;  // Not implemented
 }
 
 bool Generator::filterScan3D(  //
-    [[maybe_unused]] const mrpt::obs::CObservation3DRangeScan& pc,
-    [[maybe_unused]] mp2p_icp::metric_map_t&                   out) const
+    [[maybe_unused]] const mrpt::obs::CObservation3DRangeScan&  pc,
+    [[maybe_unused]] mp2p_icp::metric_map_t&                    out,
+    [[maybe_unused]] const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     return false;  // Not implemented
 }
 
 bool Generator::filterPointCloud(  //
-    const mrpt::maps::CPointsMap& pc, mp2p_icp::metric_map_t& out) const
+    const mrpt::maps::CPointsMap& pc, const mrpt::poses::CPose3D& sensorPose,
+    mp2p_icp::metric_map_t&                    out,
+    const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     // Create if new: Append to existing layer, if already existed.
     mrpt::maps::CPointsMap::Ptr outPc;
-    if (auto itLy = out.layers.find(params_.target_pointcloud_layer);
+    if (auto itLy = out.layers.find(params_.target_layer);
         itLy != out.layers.end())
     {
         outPc = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(itLy->second);
         if (!outPc)
             THROW_EXCEPTION_FMT(
                 "Layer '%s' must be of point cloud type.",
-                params_.target_pointcloud_layer.c_str());
+                params_.target_layer.c_str());
     }
     else
     {
-        outPc = mrpt::maps::CSimplePointsMap::Create();
-        out.layers[params_.target_pointcloud_layer] = outPc;
+        // Make a new layer of the same type than the input cloud:
+        outPc = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(
+            pc.GetRuntimeClass()->ptrCreateObject());
+        ASSERT_(outPc);
+
+        MRPT_LOG_DEBUG_FMT(
+            "[filterPointCloud] Created new layer '%s' of type '%s'",
+            params_.target_layer.c_str(), outPc->GetRuntimeClass()->className);
+
+        out.layers[params_.target_layer] = outPc;
     }
 
-    outPc->insertAnotherMap(&pc, mrpt::poses::CPose3D::Identity());
+    const mrpt::poses::CPose3D p =
+        robotPose ? robotPose.value() + sensorPose : sensorPose;
+
+    outPc->insertAnotherMap(&pc, p);
 
     return true;
 }
 
 bool Generator::filterRotatingScan(  //
     [[maybe_unused]] const mrpt::obs::CObservationRotatingScan& pc,
-    [[maybe_unused]] mp2p_icp::metric_map_t&                    out) const
+    [[maybe_unused]] mp2p_icp::metric_map_t&                    out,
+    [[maybe_unused]] const std::optional<mrpt::poses::CPose3D>& robotPose) const
 {
     return false;  // Not implemented
 }
 
 void mp2p_icp_filters::apply_generators(
     const GeneratorSet& generators, const mrpt::obs::CObservation& obs,
-    mp2p_icp::metric_map_t& output)
+    mp2p_icp::metric_map_t&                    output,
+    const std::optional<mrpt::poses::CPose3D>& robotPose)
 {
     ASSERT_(!generators.empty());
     for (const auto& g : generators)
     {
         ASSERT_(g.get() != nullptr);
-        g->process(obs, output);
+        g->process(obs, output, robotPose);
     }
 }
 
 mp2p_icp::metric_map_t mp2p_icp_filters::apply_generators(
-    const GeneratorSet& generators, const mrpt::obs::CObservation& obs)
+    const GeneratorSet& generators, const mrpt::obs::CObservation& obs,
+    const std::optional<mrpt::poses::CPose3D>& robotPose)
 {
     mp2p_icp::metric_map_t pc;
-    apply_generators(generators, obs, pc);
+    apply_generators(generators, obs, pc, robotPose);
     return pc;
 }
 
 mp2p_icp::metric_map_t mp2p_icp_filters::apply_generators(
-    const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf)
+    const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf,
+    const std::optional<mrpt::poses::CPose3D>& robotPose)
 {
     mp2p_icp::metric_map_t pc;
-    apply_generators(generators, sf, pc);
+    apply_generators(generators, sf, pc, robotPose);
     return pc;
 }
 
 void mp2p_icp_filters::apply_generators(
     const GeneratorSet& generators, const mrpt::obs::CSensoryFrame& sf,
-    mp2p_icp::metric_map_t& output)
+    mp2p_icp::metric_map_t&                    output,
+    const std::optional<mrpt::poses::CPose3D>& robotPose)
 {
     ASSERT_(!generators.empty());
     for (const auto& g : generators)
@@ -245,7 +333,7 @@ void mp2p_icp_filters::apply_generators(
         for (const auto& obs : sf)
         {
             if (!obs) continue;
-            g->process(*obs, output);
+            g->process(*obs, output, robotPose);
         }
     }
 }
