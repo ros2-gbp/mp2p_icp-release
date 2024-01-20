@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *   A Modular Optimization framework for Localization and mApping  (MOLA)
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -162,7 +162,8 @@ static void test_icp(
                 m)
             {
                 mrpt::containers::yaml ps;
-                ps["threshold"] = 0.40 * max_dim;
+                ps["threshold"]           = 0.40 * max_dim;
+                ps["thresholdAngularDeg"] = 0;
                 m->initialize(ps);
             }
 

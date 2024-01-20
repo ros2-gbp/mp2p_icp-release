@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -17,8 +17,13 @@
 
 namespace mp2p_icp_filters
 {
-/** Leaves (`keep_bbox_contents`=true) or removes (`keep_bbox_contents`=false)
- * the points in a given bounding box.
+/** Split a point cloud into those points inside and outside a given bounding
+ * box. Optionally, you can only keep one of those two clouds, by leaving the
+ * non-used one undefined in your YAML file (or as an empty string).
+ *
+ * Bounding box coordinates can contain the variables `robot_x`, `robot_y`,
+ * `robot_z` for usage of robocentric coordinates if used for simplemap
+ * filtering as part of a pipeline for the sm2mm application.
  *
  * \ingroup mp2p_icp_filters_grp
  */
@@ -36,13 +41,17 @@ class FilterBoundingBox : public mp2p_icp_filters::FilterBase
 
     struct Parameters
     {
-        void load_from_yaml(const mrpt::containers::yaml& c);
+        void load_from_yaml(
+            const mrpt::containers::yaml& c, FilterBoundingBox& parent);
 
         std::string input_pointcloud_layer =
             mp2p_icp::metric_map_t::PT_LAYER_RAW;
 
-        /** The output point cloud layer name */
-        std::string output_pointcloud_layer;
+        /** The output point cloud layer name for points INSIDE the bbox */
+        std::string inside_pointcloud_layer;
+
+        /** The output point cloud layer name for points OUTSIDE the bbox */
+        std::string outside_pointcloud_layer;
 
         /**
          * YAML loading format:
@@ -53,8 +62,6 @@ class FilterBoundingBox : public mp2p_icp_filters::FilterBase
          */
         mrpt::math::TBoundingBoxf bounding_box = {
             {-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}};
-
-        bool keep_bbox_contents = true;
     };
 
     /** Algorithm parameters */

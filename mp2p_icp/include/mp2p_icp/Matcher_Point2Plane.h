@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -21,7 +21,7 @@ namespace mp2p_icp
  * a plane in layers of the `global` input metric map.
  *
  * By default, each `local` point layer is matched against the layer with the
- * same name in the `global` map, unless especified otherwise in the base class
+ * same name in the `global` map, unless specified otherwise in the base class
  * member `weight_pt2pt_layers`. Refer to example configuration YAML files for
  * example configurations.
  *

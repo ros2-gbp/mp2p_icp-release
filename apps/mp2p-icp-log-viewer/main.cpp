@@ -1,6 +1,6 @@
 ﻿/* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 
@@ -28,11 +28,14 @@
 #include <mrpt/poses/Lie/SO.h>
 #include <mrpt/system/CDirectoryExplorer.h>
 #include <mrpt/system/filesystem.h>
+#include <mrpt/system/os.h>
 #include <mrpt/system/progress.h>
+#include <mrpt/system/string_utils.h>  // unitsFormat()
 
 #include <iostream>
 
-constexpr const char* APP_NAME = "mp2p-icp-log-viewer";
+constexpr const char* APP_NAME      = "mp2p-icp-log-viewer";
+constexpr int         MID_FONT_SIZE = 14;
 
 // =========== Declare supported cli switches ===========
 static TCLAP::CmdLine cmd(APP_NAME);
@@ -46,14 +49,20 @@ static TCLAP::ValueArg<std::string> argSearchDir(
     "d", "directory", "Directory in which to search for *.icplog files.", false,
     ".", ".", cmd);
 
-static TCLAP::ValueArg<std::string> argVerbosity(
-    "v", "verbose", "Verbosity level", false, "DEBUG", "DEBUG", cmd);
+static TCLAP::ValueArg<std::string> argSingleFile(
+    "f", "file", "Load just this one single log *.icplog file.", false,
+    "log.icplog", "log.icplog", cmd);
 
-static TCLAP::ValueArg<double> argMinQuality(
-    "", "min-quality",
-    "Minimum quality (range [0,1]) for a log files to be loaded and shown in "
-    "the list. Default=0 so all log files are visible.",
-    false, 0.0, "Quality[0,1]", cmd);
+static TCLAP::ValueArg<std::string> arg_plugins(
+    "l", "load-plugins",
+    "One or more (comma separated) *.so files to load as plugins", false,
+    "foobar.so", "foobar.so", cmd);
+
+static TCLAP::ValueArg<double> argAutoPlayPeriod(
+    "", "autoplay-period",
+    "The period (in seconds) between timestamps to load and show in autoplay "
+    "mode.",
+    false, 0.1, "period [seconds]", cmd);
 
 // =========== Declare global variables ===========
 #if MRPT_HAS_NANOGUI
@@ -63,11 +72,19 @@ mrpt::gui::CDisplayWindowGUI::Ptr win;
 
 nanogui::Slider* slSelectorICP   = nullptr;
 nanogui::Button *btnSelectorBack = nullptr, *btnSelectorForw = nullptr;
+nanogui::Button* btnSelectorAutoplay = nullptr;
+bool             isAutoPlayActive    = false;
+double           lastAutoPlayTime    = .0;
 
-std::array<nanogui::Label*, 4> lbICPStats = {
-    nullptr, nullptr, nullptr, nullptr};
-nanogui::CheckBox* cbShowInitialPose      = nullptr;
-nanogui::CheckBox* cbViewOrtho            = nullptr;
+std::array<nanogui::TextBox*, 5> lbICPStats = {
+    nullptr, nullptr, nullptr, nullptr, nullptr};
+nanogui::CheckBox* cbShowInitialPose    = nullptr;
+nanogui::CheckBox* cbViewOrtho          = nullptr;
+nanogui::CheckBox* cbCameraFollowsLocal = nullptr;
+nanogui::CheckBox* cbViewVoxelsAsPoints = nullptr;
+nanogui::CheckBox* cbColorizeLocalMap   = nullptr;
+nanogui::CheckBox* cbColorizeGlobalMap  = nullptr;
+
 nanogui::CheckBox* cbViewFinalPairings    = nullptr;
 nanogui::CheckBox* cbViewPairingEvolution = nullptr;
 
@@ -90,10 +107,43 @@ nanogui::Label * lbDepthFieldValues = nullptr, *lbDepthFieldMid = nullptr,
 nanogui::Slider* slGTPose[6] = {nullptr, nullptr, nullptr,
                                 nullptr, nullptr, nullptr};
 
-std::vector<std::string>        layerNames_global, layerNames_local;
-std::vector<nanogui::CheckBox*> cbPointLayers_global, cbPointLayers_local;
+std::vector<std::string> layerNames_global, layerNames_local;
 
-std::vector<mp2p_icp::LogRecord> logRecords;
+std::map<std::string, nanogui::CheckBox*> cbLayersByName_global;
+std::map<std::string, nanogui::CheckBox*> cbLayersByName_local;
+
+class DelayedLoadLog
+{
+   public:
+    DelayedLoadLog() = default;
+    DelayedLoadLog(
+        const std::string& fileName, const std::string& shortFileName)
+        : filename_(fileName), shortFileName_(shortFileName)
+    {
+    }
+
+    mp2p_icp::LogRecord& get()
+    {
+        if (!log_)
+        {
+            // Load now:
+            log_ = mp2p_icp::LogRecord::LoadFromFile(filename_);
+        }
+
+        return log_.value();
+    }
+
+    void dispose() { log_.reset(); }
+
+    const std::string& filename() const { return filename_; }
+    const std::string& shortFileName() const { return shortFileName_; }
+
+   private:
+    std::optional<mp2p_icp::LogRecord> log_;
+    std::string                        filename_, shortFileName_;
+};
+
+std::vector<DelayedLoadLog> logRecords;
 
 static void rebuild_3d_view();
 
@@ -101,60 +151,44 @@ static void main_show_gui()
 {
     using namespace std::string_literals;
 
-    const std::string searchDir = argSearchDir.getValue();
-    ASSERT_DIRECTORY_EXISTS_(searchDir);
-
-    std::cout << "Searching in: '" << searchDir
-              << "' for files with extension '" << argExtension.getValue()
-              << "'" << std::endl;
-
     mrpt::system::CDirectoryExplorer::TFileInfoList files;
-    mrpt::system::CDirectoryExplorer::explore(
-        searchDir, FILE_ATTRIB_ARCHIVE, files);
-    mrpt::system::CDirectoryExplorer::filterByExtension(
-        files, argExtension.getValue());
-    mrpt::system::CDirectoryExplorer::sortByName(files);
 
-    std::cout << "Found " << files.size() << " ICP records." << std::endl;
+    if (!argSingleFile.isSet())
+    {
+        const std::string searchDir = argSearchDir.getValue();
+        ASSERT_DIRECTORY_EXISTS_(searchDir);
+
+        std::cout << "Searching in: '" << searchDir
+                  << "' for files with extension '" << argExtension.getValue()
+                  << "'" << std::endl;
+
+        mrpt::system::CDirectoryExplorer::explore(
+            searchDir, FILE_ATTRIB_ARCHIVE, files);
+        mrpt::system::CDirectoryExplorer::filterByExtension(
+            files, argExtension.getValue());
+        mrpt::system::CDirectoryExplorer::sortByName(files);
+
+        std::cout << "Found " << files.size() << " ICP records." << std::endl;
+    }
+    else
+    {
+        // Load one single file:
+        std::cout << "Loading one single log file: " << argSingleFile.getValue()
+                  << std::endl;
+
+        files.resize(1);
+        files[0].wholePath = argSingleFile.getValue();
+    }
 
     // load files:
-    size_t filesLoaded = 0, filesFilteredOut = 0;
-    std::cout << std::endl;
     for (const auto& file : files)
-    {
-        const double pc = static_cast<double>(filesLoaded) /
-                          (std::max<size_t>(1, files.size() - 1));
-        printf(
-            "\r"
-            " Loading %s %7.02f%% (%u / %u)       ",
-            mrpt::system::progress(pc, 50).c_str(), 100 * pc,
-            static_cast<unsigned int>(filesLoaded + 1),
-            static_cast<unsigned int>(files.size()));
-        fflush(stdout);
-
-        const auto& lr = logRecords.emplace_back(
-            mp2p_icp::LogRecord::LoadFromFile(file.wholePath));
-
-        filesLoaded++;
-
-        // Filter by quality:
-        if (lr.icpResult.quality < argMinQuality.getValue())
-        {
-            ++filesFilteredOut;
-            // Remove last one:
-            logRecords.erase(logRecords.rbegin().base());
-        }
-    }
-    std::cout << std::endl;
-    std::cout << "Loaded " << logRecords.size() << " ICP records ("
-              << filesLoaded << " actually loaded, " << filesFilteredOut
-              << " filtered out)" << std::endl;
+        logRecords.emplace_back(file.wholePath, file.name);
 
     ASSERT_(!logRecords.empty());
 
     // Obtain layer info from first entry:
     {
-        const auto& lr = logRecords.front();
+        const auto& lr = logRecords.front().get();
         if (layerNames_global.empty() && lr.pcGlobal)
         {
             for (const auto& layer : lr.pcGlobal->layers)
@@ -229,7 +263,12 @@ static void main_show_gui()
         slSelectorICP->setValue(0);
         slSelectorICP->setCallback([&](float /*v*/) { rebuild_3d_view(); });
 
-        for (auto& lb : lbICPStats) lb = w->add<nanogui::Label>("  ");
+        for (auto& lb : lbICPStats)
+        {
+            lb = w->add<nanogui::TextBox>("  ");
+            lb->setFontSize(MID_FONT_SIZE);
+            lb->setAlignment(nanogui::TextBox::Alignment::Left);
+        }
 
         // navigation panel:
         {
@@ -256,9 +295,18 @@ static void main_show_gui()
                 if (s->value() < s->range().second - 0.01f)
                 {
                     s->setValue(s->value() + 1);
-                    s->callback()(s->value());
+                    rebuild_3d_view();
                 }
             });
+
+            pn->add<nanogui::Label>(" ");  // separator
+
+            btnSelectorAutoplay =
+                pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_PLAY);
+            btnSelectorAutoplay->setFlags(nanogui::Button::ToggleButton);
+
+            btnSelectorAutoplay->setChangeCallback(
+                [&](bool active) { isAutoPlayActive = active; });
         }
 
         //
@@ -286,23 +334,24 @@ static void main_show_gui()
         tab1->add<nanogui::Label>(
             "ICP result pose [x y z yaw(deg) pitch(deg) roll(deg)]:");
         tbLogPose = tab1->add<nanogui::TextBox>();
-        tbLogPose->setFontSize(16);
+        tbLogPose->setFontSize(MID_FONT_SIZE);
         tbLogPose->setEditable(true);
+        tbLogPose->setAlignment(nanogui::TextBox::Alignment::Left);
 
         tab1->add<nanogui::Label>("Initial -> final pose change:");
         tbInit2Final = tab1->add<nanogui::TextBox>();
-        tbInit2Final->setFontSize(16);
+        tbInit2Final->setFontSize(MID_FONT_SIZE);
         tbInit2Final->setEditable(false);
 
         tab2->add<nanogui::Label>(
             "Uncertainty: diagonal sigmas (x y z yaw pitch roll)");
         tbCovariance = tab2->add<nanogui::TextBox>();
-        tbCovariance->setFontSize(16);
+        tbCovariance->setFontSize(MID_FONT_SIZE);
         tbCovariance->setEditable(false);
 
         tab2->add<nanogui::Label>("Uncertainty: Covariance condition numbers");
         tbConditionNumber = tab2->add<nanogui::TextBox>();
-        tbConditionNumber->setFontSize(16);
+        tbConditionNumber->setFontSize(MID_FONT_SIZE);
         tbConditionNumber->setEditable(false);
 
         const float handTunedRange[6] = {4.0,        4.0,         10.0,
@@ -316,7 +365,7 @@ static void main_show_gui()
 
             slGTPose[i]->setCallback([=](float v) {
                 const size_t idx = mrpt::round(slSelectorICP->value());
-                auto&        lr  = logRecords.at(idx);
+                auto&        lr  = logRecords.at(idx).get();
 
                 auto p = lr.icpResult.optimal_tf.mean.asTPose();
                 p[i]   = v;
@@ -328,7 +377,7 @@ static void main_show_gui()
 
         tab1->add<nanogui::Label>("Initial guess pose:");
         tbInitialGuess = tab1->add<nanogui::TextBox>();
-        tbInitialGuess->setFontSize(16);
+        tbInitialGuess->setFontSize(14);
         tbInitialGuess->setEditable(true);
 
         // Save map buttons:
@@ -345,43 +394,44 @@ static void main_show_gui()
         {
             auto pn = tab3->add<nanogui::Widget>();
             pn->setLayout(new nanogui::BoxLayout(
-                nanogui::Orientation::Horizontal, nanogui::Alignment::Middle));
+                nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
             pn->add<nanogui::Button>("Export 'local' map...")
                 ->setCallback([&]() {
                     const size_t idx = mrpt::round(slSelectorICP->value());
-                    auto&        lr  = logRecords.at(idx);
+                    auto&        lr  = logRecords.at(idx).get();
                     ASSERT_(lr.pcLocal);
                     lambdaSave(*lr.pcLocal);
                 });
             pn->add<nanogui::Button>("Export 'global' map...")
                 ->setCallback([&]() {
                     const size_t idx = mrpt::round(slSelectorICP->value());
-                    auto&        lr  = logRecords.at(idx);
+                    auto&        lr  = logRecords.at(idx).get();
                     ASSERT_(lr.pcGlobal);
                     lambdaSave(*lr.pcGlobal);
                 });
         }
 
-        tab3->add<nanogui::Label>("[GLOBAL point cloud] Show point layers:");
-        cbPointLayers_global.resize(layerNames_global.size());
+        tab3->add<nanogui::Label>("[GLOBAL map] Visible layers:");
+
         for (size_t i = 0; i < layerNames_global.size(); i++)
         {
-            cbPointLayers_global[i] =
-                tab3->add<nanogui::CheckBox>(layerNames_global.at(i));
-            cbPointLayers_global[i]->setChecked(true);
-            cbPointLayers_global[i]->setCallback(
-                [](bool) { rebuild_3d_view(); });
+            auto cb = tab3->add<nanogui::CheckBox>(layerNames_global.at(i));
+            cb->setChecked(true);
+            cb->setCallback([](bool) { rebuild_3d_view(); });
+            cb->setFontSize(13);
+
+            cbLayersByName_global[layerNames_global.at(i)] = cb;
         }
 
-        tab3->add<nanogui::Label>("[LOCAL point cloud] Show point layers:");
-        cbPointLayers_local.resize(layerNames_local.size());
+        tab3->add<nanogui::Label>("[LOCAL map] Visible layers:");
         for (size_t i = 0; i < layerNames_local.size(); i++)
         {
-            cbPointLayers_local[i] =
-                tab3->add<nanogui::CheckBox>(layerNames_local.at(i));
-            cbPointLayers_local[i]->setChecked(true);
-            cbPointLayers_local[i]->setCallback(
-                [](bool) { rebuild_3d_view(); });
+            auto cb = tab3->add<nanogui::CheckBox>(layerNames_local.at(i));
+            cb->setChecked(true);
+            cb->setCallback([](bool) { rebuild_3d_view(); });
+            cb->setFontSize(13);
+
+            cbLayersByName_local[layerNames_local.at(i)] = cb;
         }
 
         // tab4: pairings:
@@ -466,13 +516,30 @@ static void main_show_gui()
         lbDepthFieldThickness =
             tab5->add<nanogui::Label>("Max-Min depth thickness:");
         slThicknessDepthField = tab5->add<nanogui::Slider>();
-        slThicknessDepthField->setRange({-2.0, 3.0});
+        slThicknessDepthField->setRange({-2.0, 4.0});
         slThicknessDepthField->setValue(3.0);
         slThicknessDepthField->setCallback([&](float) { rebuild_3d_view(); });
         lbDepthFieldValues = tab5->add<nanogui::Label>(" ");
 
         cbViewOrtho = tab5->add<nanogui::CheckBox>("Orthogonal view");
         cbViewOrtho->setCallback([&](bool) { rebuild_3d_view(); });
+
+        cbCameraFollowsLocal =
+            tab5->add<nanogui::CheckBox>("Camera follows 'local'");
+        cbCameraFollowsLocal->setCallback([&](bool) { rebuild_3d_view(); });
+
+        cbViewVoxelsAsPoints =
+            tab5->add<nanogui::CheckBox>("Render voxel maps as point clouds");
+        cbViewVoxelsAsPoints->setChecked(true);
+        cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
+
+        cbColorizeLocalMap =
+            tab5->add<nanogui::CheckBox>("Recolorize local map");
+        cbColorizeLocalMap->setCallback([&](bool) { rebuild_3d_view(); });
+
+        cbColorizeGlobalMap =
+            tab5->add<nanogui::CheckBox>("Recolorize global map");
+        cbColorizeGlobalMap->setCallback([&](bool) { rebuild_3d_view(); });
 
         // ----
         w->add<nanogui::Label>(" ");  // separator
@@ -498,6 +565,10 @@ static void main_show_gui()
                     break;
                 case GLFW_KEY_PAGE_UP:
                     increment = -100;
+                    break;
+                case GLFW_KEY_SPACE:
+                    isAutoPlayActive = !isAutoPlayActive;
+                    btnSelectorAutoplay->setPushed(isAutoPlayActive);
                     break;
             };
 
@@ -527,6 +598,22 @@ static void main_show_gui()
     // ---------------------
     win->drawAll();
     win->setVisible(true);
+
+    win->addLoopCallback([&]() {
+        if (!isAutoPlayActive) return;
+
+        const double tNow = mrpt::Clock::nowDouble();
+        if (tNow - lastAutoPlayTime < argAutoPlayPeriod.getValue()) return;
+
+        lastAutoPlayTime = tNow;
+
+        if (slSelectorICP->value() < slSelectorICP->range().second - 0.01f)
+        {
+            slSelectorICP->setValue(slSelectorICP->value() + 1);
+            rebuild_3d_view();
+        }
+    });
+
     nanogui::mainloop(10 /*refresh Hz*/);
 
     nanogui::shutdown();
@@ -556,25 +643,36 @@ void rebuild_3d_view()
 
     glVizICP->clear();
 
-    const auto& lr = logRecords.at(idx);
+    // Free memory
+    static size_t lastIdx = 0;
 
-    lbICPStats[0]->setCaption(mrpt::format(
-        "ICP pair #%u, local: ID:%u%s, global: ID:%u%s",
-        static_cast<unsigned int>(idx),
+    if (idx != lastIdx)
+    {  // free memory:
+        logRecords.at(lastIdx).dispose();
+    }
+    lastIdx = idx;
+
+    // lazy load from disk happens in the "get()":
+    const auto& lr = logRecords.at(idx).get();
+
+    lbICPStats[0]->setValue(logRecords.at(idx).shortFileName());
+
+    lbICPStats[1]->setValue(mrpt::format(
+        "ICP log #%zu | Local: ID:%u%s | Global: ID:%u%s", idx,
         static_cast<unsigned int>(lr.pcLocal->id ? lr.pcLocal->id.value() : 0),
         lr.pcLocal->label ? lr.pcLocal->label.value().c_str() : "",
         static_cast<unsigned int>(
             lr.pcGlobal->id ? lr.pcGlobal->id.value() : 0),
         lr.pcGlobal->label ? lr.pcGlobal->label.value().c_str() : ""));
 
-    lbICPStats[1]->setCaption(mrpt::format(
-        "Log quality: %.02f%% iters: %u Term.Reason: %s",
+    lbICPStats[2]->setValue(mrpt::format(
+        "Quality: %.02f%% | Iters: %u | Term.Reason: %s",
         100.0 * lr.icpResult.quality,
         static_cast<unsigned int>(lr.icpResult.nIterations),
         mrpt::typemeta::enum2str(lr.icpResult.terminationReason).c_str()));
 
-    lbICPStats[2]->setCaption("Global: "s + lr.pcGlobal->contents_summary());
-    lbICPStats[3]->setCaption("Local: "s + lr.pcLocal->contents_summary());
+    lbICPStats[3]->setValue("Global: "s + lr.pcGlobal->contents_summary());
+    lbICPStats[4]->setValue("Local: "s + lr.pcLocal->contents_summary());
 
     tbInitialGuess->setValue(lr.initialGuessLocalWrtGlobal.asString());
 
@@ -655,13 +753,45 @@ void rebuild_3d_view()
     mp2p_icp::render_params_t rpGlobal;
 
     rpGlobal.points.visible = false;
-    for (const auto& cbPL : cbPointLayers_global)
+    for (const auto& [lyName, cb] : cbLayersByName_global)
     {
-        if (!cbPL->checked()) continue;  // hidden
+        // Update stats in the cb label:
+        cb->setCaption(lyName);  // default
+        if (auto itL = lr.pcGlobal->layers.find(lyName);
+            itL != lr.pcGlobal->layers.end())
+        {
+            if (auto pc = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(
+                    itL->second);
+                pc)
+            {
+                cb->setCaption(
+                    lyName + " | "s +
+                    mrpt::system::unitsFormat(static_cast<double>(pc->size())) +
+                    " points"s + " | class="s +
+                    pc->GetRuntimeClass()->className);
+            }
+            else
+            {
+                cb->setCaption(
+                    lyName + " | class="s +
+                    itL->second->GetRuntimeClass()->className);
+            }
+        }
+
+        // show/hide:
+        if (!cb->checked()) continue;  // hidden
         rpGlobal.points.visible = true;
 
-        auto& rpL     = rpGlobal.points.perLayer[cbPL->caption()];
-        rpL.pointSize = slPointSize->value();
+        auto& rpL                      = rpGlobal.points.perLayer[lyName];
+        rpL.pointSize                  = slPointSize->value();
+        rpL.render_voxelmaps_as_points = cbViewVoxelsAsPoints->checked();
+
+        if (cbColorizeGlobalMap->checked())
+        {
+            auto& cm                  = rpL.colorMode.emplace();
+            cm.colorMap               = mrpt::img::TColormap::cmHOT;
+            cm.recolorizeByCoordinate = mp2p_icp::Coordinate::Z;
+        }
     }
 
     {
@@ -682,13 +812,45 @@ void rebuild_3d_view()
     mp2p_icp::render_params_t rpLocal;
 
     rpLocal.points.visible = false;
-    for (const auto& cbPL : cbPointLayers_local)
+    for (const auto& [lyName, cb] : cbLayersByName_local)
     {
-        if (!cbPL->checked()) continue;  // hidden
+        // Update stats in the cb label:
+        cb->setCaption(lyName);  // default
+        if (auto itL = lr.pcLocal->layers.find(lyName);
+            itL != lr.pcLocal->layers.end())
+        {
+            if (auto pc = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(
+                    itL->second);
+                pc)
+            {
+                cb->setCaption(
+                    lyName + " | "s +
+                    mrpt::system::unitsFormat(
+                        static_cast<double>(pc->size()), 2, false) +
+                    " points"s + " | class="s +
+                    pc->GetRuntimeClass()->className);
+            }
+            else
+            {
+                cb->setCaption(
+                    lyName + " | class="s +
+                    itL->second->GetRuntimeClass()->className);
+            }
+        }
+
+        // show/hide:
+        if (!cb->checked()) continue;  // hidden
         rpLocal.points.visible = true;
 
-        auto& rpL     = rpLocal.points.perLayer[cbPL->caption()];
-        rpL.pointSize = slPointSize->value();
+        auto& rpL                      = rpLocal.points.perLayer[lyName];
+        rpL.pointSize                  = slPointSize->value();
+        rpL.render_voxelmaps_as_points = cbViewVoxelsAsPoints->checked();
+        if (cbColorizeLocalMap->checked())
+        {
+            auto& cm                  = rpL.colorMode.emplace();
+            cm.colorMap               = mrpt::img::TColormap::cmHOT;
+            cm.recolorizeByCoordinate = mp2p_icp::Coordinate::Z;
+        }
     }
 
     {
@@ -707,6 +869,13 @@ void rebuild_3d_view()
         std::lock_guard<std::mutex> lck(win->background_scene_mtx);
         win->camera().setCameraProjective(!cbViewOrtho->checked());
 
+        if (cbCameraFollowsLocal->checked())
+        {
+            win->camera().setCameraPointing(
+                relativePose.mean.x(), relativePose.mean.y(),
+                relativePose.mean.z());
+        }
+
         // clip planes:
         const auto depthFieldMid = std::pow(10.0, slMidDepthField->value());
         const auto depthFieldThickness =
@@ -719,7 +888,7 @@ void rebuild_3d_view()
         lbDepthFieldMid->setCaption(
             mrpt::format("Center depth clip plane: %f", depthFieldMid));
         lbDepthFieldThickness->setCaption(
-            mrpt::format("Max-Min depth thickness:%f", depthFieldThickness));
+            mrpt::format("Max-Min depth thickness: %f", depthFieldThickness));
         lbDepthFieldValues->setCaption(mrpt::format(
             "Depth field: near plane=%f far plane=%f", clipNear, clipFar));
 
@@ -782,6 +951,19 @@ int main(int argc, char** argv)
     {
         // Parse arguments:
         if (!cmd.parse(argc, argv)) return 1;  // should exit.
+
+        // Load plugins:
+        if (arg_plugins.isSet())
+        {
+            std::string errMsg;
+            const auto  plugins = arg_plugins.getValue();
+            std::cout << "Loading plugin(s): " << plugins << std::endl;
+            if (!mrpt::system::loadPluginModules(plugins, errMsg))
+            {
+                std::cerr << errMsg << std::endl;
+                return 1;
+            }
+        }
 
         main_show_gui();
         return 0;
