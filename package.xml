@@ -5,7 +5,7 @@
 -->
 <package format="3">
   <name>mp2p_icp</name>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <description>A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++</description>
 
   <author     email="joseluisblancoc@gmail.com">Jose-Luis Blanco-Claraco</author>
@@ -13,10 +13,11 @@
 
   <url type="website">https://github.com/MOLAorg/mp2p_icp</url>
 
-  <license>BSD</license>
+  <license file="COPYING">BSD</license>
 
   <!-- Deps required by user code (they are in public headers or built as ROS (vs system) packages -->
   <depend>mrpt2</depend>
+  <depend>mola_common</depend>
 
   <doc_depend>doxygen</doc_depend>
 

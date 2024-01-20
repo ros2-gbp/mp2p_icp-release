@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -24,6 +24,10 @@ void Solver_GaussNewton::initialize(const mrpt::containers::yaml& params)
 
     MCP_LOAD_REQ(params, maxIterations);
     MCP_LOAD_OPT(params, innerLoopVerbose);
+    MCP_LOAD_OPT(params, robustKernel);
+
+    DECLARE_PARAMETER_OPT(params, robustKernelParam);
+
     if (params.has("pair_weights"))
         pairWeights.load_from(params["pair_weights"]);
 }
@@ -34,11 +38,16 @@ bool Solver_GaussNewton::impl_optimal_pose(
 {
     MRPT_START
 
+    checkAllParametersAreRealized();
+
     out = OptimalTF_Result();
 
     OptimalTF_GN_Parameters gnParams;
     gnParams.maxInnerLoopIterations = maxIterations;
     gnParams.pairWeights            = pairWeights;
+    gnParams.kernel                 = robustKernel;
+    gnParams.kernelParam            = robustKernelParam;
+    gnParams.prior                  = sc.prior;
 
     ASSERT_(sc.guessRelativePose.has_value());
     gnParams.linearizationPoint =

@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -50,7 +50,7 @@ static PointMatcher<double>::DataPoints pointsToPM(const metric_map_t& pc)
     for (const auto& ly : pc.layers)
     {
         // const std::string&                 name = ly.first;
-        auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(ly.second);
+        auto pts = mp2p_icp::MapToPointsMap(*ly.second);
         if (!pts) continue;  // Not a point cloud layer
 
         const auto xs = pts->getPointsBufferRef_x();
@@ -77,6 +77,8 @@ void ICP_LibPointmatcher::align(
     [[maybe_unused]] const metric_map_t&        pcGlobal,
     [[maybe_unused]] const mrpt::math::TPose3D& initialGuessLocalWrtGlobal,
     [[maybe_unused]] const Parameters& p, [[maybe_unused]] Results& result,
+    [[maybe_unused]] const std::optional<mrpt::poses::CPose3DPDFGaussianInf>&
+                                                          prior,
     [[maybe_unused]] const mrpt::optional_ref<LogRecord>& outputDebugInfo)
 {
     using namespace std::string_literals;
