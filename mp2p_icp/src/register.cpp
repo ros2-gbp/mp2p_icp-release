@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -13,6 +13,7 @@
 #include <mp2p_icp/ICP.h>
 #include <mp2p_icp/ICP_LibPointmatcher.h>
 #include <mp2p_icp/LogRecord.h>
+#include <mp2p_icp/Matcher_Adaptive.h>
 #include <mp2p_icp/Matcher_Point2Line.h>
 #include <mp2p_icp/Matcher_Point2Plane.h>
 #include <mp2p_icp/Matcher_Points_DistanceThreshold.h>
@@ -27,11 +28,13 @@
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/core/initializer.h>
 
+/** \defgroup mp2p_icp_grp mp2p_icp library
+ * Main library for ICP components and pipelines.
+ */
+
 MRPT_INITIALIZER(register_mp2p_icp)
 {
     using mrpt::rtti::registerClass;
-
-    registerClass(CLASS_ID(mp2p_icp::metric_map_t));
 
     registerClass(CLASS_ID(mp2p_icp::ICP));
     registerClass(CLASS_ID(mp2p_icp::ICP_LibPointmatcher));
@@ -46,6 +49,7 @@ MRPT_INITIALIZER(register_mp2p_icp)
     registerClass(CLASS_ID(mp2p_icp::Matcher_Points_InlierRatio));
     registerClass(CLASS_ID(mp2p_icp::Matcher_Point2Line));
     registerClass(CLASS_ID(mp2p_icp::Matcher_Point2Plane));
+    registerClass(CLASS_ID(mp2p_icp::Matcher_Adaptive));
 
     registerClass(CLASS_ID(mp2p_icp::QualityEvaluator));
     registerClass(CLASS_ID(mp2p_icp::QualityEvaluator_PairedRatio));
