@@ -12,28 +12,37 @@ cmake_minimum_required(VERSION 3.4)
 # Tell CMake we'll use C++ for use in its tests/flags
 project(mp2p_icp_all LANGUAGES CXX)
 
+# MOLA CMake scripts: "mola_xxx()"
+# to allow stand-along builds outside of MOLA, use local copy instead:
+find_package(mola_common QUIET)
+if (NOT mola_common_FOUND)
+	message(STATUS "Standalone ${PROJECT_NAME} build: using mola_common from submodule.")
+	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mola_common-build")
+	execute_process(COMMAND "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/3rdparty/mola_common"
+	                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mola_common-build")
+	# 2nd attempt:
+	set(mola_common_DIR "${CMAKE_BINARY_DIR}/mola_common-build")
+	find_package(mola_common REQUIRED)
+endif()
+
 # 3rd party:
 add_subdirectory(3rdparty)
 
 # find dependencies:
-find_package(MRPT 2.4.0 REQUIRED COMPONENTS containers tfest maps gui)
+find_package(MRPT 2.11.5 REQUIRED COMPONENTS containers tfest maps gui)
+find_package(Threads REQUIRED)
+find_package(TBB) # optional
 
-# MOLA CMake scripts: "mola_xxx()"
-# to allow stand-along builds outside of MOLA, use local copy instead:
-find_package(mola-common QUIET)
-if (NOT mola-common_FOUND)
-	message(STATUS "Standalone ${PROJECT_NAME} build: using mola-common from submodule.")
-	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mola-common-build")
-	execute_process(COMMAND "${CMAKE_COMMAND}" "${PROJECT_SOURCE_DIR}/3rdparty/mola-common"
-	                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mola-common-build")
-	# 2nd attempt:
-	set(mola-common_DIR "${CMAKE_BINARY_DIR}/mola-common-build")
-	find_package(mola-common REQUIRED)
+if (TBB_FOUND)
+	option(MP2PICP_USE_TBB "If found TBB, this option controls whether to use it or not" ON)
 endif()
 
 # -----------------------
 # define library targets:
 # -----------------------
+
+# Metric map container library:
+add_subdirectory(mp2p_icp_map)
 
 # Main mp2p_icp library:
 add_subdirectory(mp2p_icp)

@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2021 Jose Luis Blanco, University of Almeria
+ * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
  * See LICENSE for license information.
  * ------------------------------------------------------------------------- */
 /**
@@ -26,19 +26,33 @@ void QualityEvaluator_PairedRatio::initialize(
     if (!p.has("allowMatchAlreadyMatchedGlobalPoints"))
         p["allowMatchAlreadyMatchedGlobalPoints"] = true;
 
+    MCP_LOAD_OPT(params, reuse_icp_pairings);
+
+    // Even if reuse_icp_pairings==true, we need the matcher to check its
+    // weight_pt2pt_layers:
     matcher_.initialize(p);
 }
 
 double QualityEvaluator_PairedRatio::evaluate(
     const metric_map_t& pcGlobal, const metric_map_t& pcLocal,
-    const mrpt::poses::CPose3D&      localPose,
-    [[maybe_unused]] const Pairings& pairingsFromICP) const
+    const mrpt::poses::CPose3D& localPose,
+    const Pairings&             pairingsFromICP) const
 {
-    mp2p_icp::Pairings pairings;
+    const mp2p_icp::Pairings* pairings = nullptr;
+    mp2p_icp::Pairings        newPairings;
 
-    MatchState ms(pcGlobal, pcLocal);
+    if (reuse_icp_pairings)
+    {
+        // Use last pairings:
+        pairings = &pairingsFromICP;
+    }
+    else
+    {
+        MatchState ms(pcGlobal, pcLocal);
+        matcher_.match(pcGlobal, pcLocal, localPose, {}, ms, newPairings);
 
-    matcher_.match(pcGlobal, pcLocal, localPose, {}, ms, pairings);
+        pairings = &newPairings;
+    }
 
     // The ratio must be accounted for using the number of points in
     // the active layers:
@@ -64,5 +78,5 @@ double QualityEvaluator_PairedRatio::evaluate(
 
     ASSERT_(nEffectiveLocalPoints != 0);
 
-    return pairings.size() / double(nEffectiveLocalPoints);
+    return pairings->size() / double(nEffectiveLocalPoints);
 }
