@@ -151,7 +151,6 @@ function(mola_set_target_build_options TARGETNAME)
     target_compile_options(${TARGETNAME} PRIVATE
       -Wall -Wextra -Wshadow
       -Werror=return-type # error on missing return();
-      -Wabi=11
       -Wtype-limits -Wcast-align -Wparentheses
       -fPIC
     )
