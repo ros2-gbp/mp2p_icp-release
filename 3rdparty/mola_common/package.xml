@@ -5,7 +5,7 @@
 -->
 <package format="3">
   <name>mola_common</name>
-  <version>0.2.2</version>
+  <version>0.3.0</version>
   <description>Common CMake scripts to all MOLA modules</description>
 
   <author     email="joseluisblancoc@gmail.com">Jose-Luis Blanco-Claraco</author>
