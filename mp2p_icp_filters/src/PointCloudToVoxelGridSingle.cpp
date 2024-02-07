@@ -35,6 +35,8 @@ void PointCloudToVoxelGridSingle::processPointCloud(
     const auto& zs   = p.getPointsBufferRef_z();
     const auto  npts = xs.size();
 
+    pts_voxels.reserve(pts_voxels.size() + npts);
+
     for (std::size_t i = 0; i < npts; i++)
     {
         const auto x = xs[i];
@@ -44,17 +46,21 @@ void PointCloudToVoxelGridSingle::processPointCloud(
         const indices_t vxl_idx = {coord2idx(x), coord2idx(y), coord2idx(z)};
 
         auto itVoxel = pts_voxels.find(vxl_idx);
+
         if (itVoxel != pts_voxels.end())
         {
             // (const cast: required for tsl::robin_map)
-            const_cast<voxel_t&>(itVoxel->second).pointCount++;
+            auto& vx = const_cast<voxel_t&>(itVoxel->second);
 
-            continue;  // already existed, do nothing else
+            if (vx.pointCount == 0)
+                vx = {mrpt::math::TPoint3Df(x, y, z), i, &p, 1};
+            else
+                vx.pointCount++;
         }
         else
         {
             // insert new
-            pts_voxels[vxl_idx] = {mrpt::math::TPoint3Df(x, y, z), i, &p, 0};
+            pts_voxels[vxl_idx] = {mrpt::math::TPoint3Df(x, y, z), i, &p, 1};
         }
     }
 }
@@ -62,5 +68,6 @@ void PointCloudToVoxelGridSingle::processPointCloud(
 void PointCloudToVoxelGridSingle::clear()
 {
     //
+    pts_voxels.min_load_factor(0.01f);
     pts_voxels.clear();
 }
