@@ -1,3 +1,26 @@
+## mp2p_icp (rolling) - 1.2.0-1
+
+The packages in the `mp2p_icp` repository were released into the `rolling` distro by running `/usr/bin/bloom-release -r rolling mp2p_icp` on `Fri, 16 Feb 2024 09:58:23 -0000`
+
+The `mp2p_icp` package was released.
+
+Version of package(s) in repository `mp2p_icp`:
+
+- upstream repository: https://github.com/MOLAorg/mp2p_icp.git
+- release repository: https://github.com/ros2-gbp/mp2p_icp-release.git
+- rosdistro version: `1.1.1-1`
+- old version: `1.1.1-1`
+- new version: `1.2.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.11.2`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.22.2`
+- rosdistro version: `0.9.0`
+- vcstools version: `0.1.42`
+
+
 ## mp2p_icp (iron) - 1.2.0-1
 
 The packages in the `mp2p_icp` repository were released into the `iron` distro by running `/usr/bin/bloom-release -r iron mp2p_icp` on `Fri, 16 Feb 2024 09:56:28 -0000`
