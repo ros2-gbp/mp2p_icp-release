@@ -9,7 +9,7 @@ mola_add_executable(
   SOURCES
     main.cpp
   LINK_LIBRARIES
-    mp2p_icp
+    mp2p_icp_map
     mrpt::maps
     mrpt::obs
     mrpt::tclap
