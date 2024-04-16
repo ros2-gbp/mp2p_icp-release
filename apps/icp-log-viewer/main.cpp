@@ -5,7 +5,7 @@
  * ------------------------------------------------------------------------- */
 
 /**
- * @file   mp2p-icp-log-viewer/main.cpp
+ * @file   icp-log-viewer/main.cpp
  * @brief  GUI tool to analize ICP log records (*.icplog files)
  * @author Jose Luis Blanco Claraco
  * @date   Sep 15, 2021
@@ -19,6 +19,7 @@
 // other deps:
 #include <mrpt/3rdparty/tclap/CmdLine.h>
 #include <mrpt/config.h>
+#include <mrpt/config/CConfigFile.h>
 #include <mrpt/core/round.h>
 #include <mrpt/opengl/CEllipsoid3D.h>
 #include <mrpt/opengl/CGridPlaneXY.h>
@@ -34,7 +35,9 @@
 
 #include <iostream>
 
-constexpr const char* APP_NAME      = "mp2p-icp-log-viewer";
+#include "../libcfgpath/cfgpath.h"
+
+constexpr const char* APP_NAME      = "icp-log-viewer";
 constexpr int         MID_FONT_SIZE = 14;
 
 // =========== Declare supported cli switches ===========
@@ -147,7 +150,9 @@ class DelayedLoadLog
 
 std::vector<DelayedLoadLog> logRecords;
 
-static void rebuild_3d_view();
+static void rebuild_3d_view(bool regenerateMaps = true);
+
+static void rebuild_3d_view_fast() { rebuild_3d_view(false); }
 
 static void main_show_gui()
 {
@@ -211,9 +216,14 @@ static void main_show_gui()
         }
     }
 
+    // Get user app config file
+    char appCfgFile[1024];
+    ::get_user_config_file(appCfgFile, sizeof(appCfgFile), APP_NAME);
+    mrpt::config::CConfigFile appCfg(appCfgFile);
+
     /*
      * -------------------------------------------------------------------
-     * Plot 3D:
+     * GUI
      * --------------------------------------------------------------------
      */
     nanogui::init();
@@ -243,59 +253,60 @@ static void main_show_gui()
     }
 
     // Control GUI sub-window:
-    {
-        auto w = win->createManagedSubWindow("Control");
-        w->setPosition({5, 25});
-        w->requestFocus();
-        w->setLayout(new nanogui::BoxLayout(
-            nanogui::Orientation::Vertical, nanogui::Alignment::Fill, 5, 2));
-        w->setFixedWidth(450);
+    auto w = win->createManagedSubWindow("Control");
+    w->setPosition({5, 25});
+    w->requestFocus();
+    w->setLayout(new nanogui::BoxLayout(
+        nanogui::Orientation::Vertical, nanogui::Alignment::Fill, 5, 2));
+    w->setFixedWidth(400);
 
-        cbShowInitialPose =
-            w->add<nanogui::CheckBox>("Show at INITIAL GUESS pose");
-        cbShowInitialPose->setCallback([=](bool v) {
+    cbShowInitialPose = w->add<nanogui::CheckBox>("Show at INITIAL GUESS pose");
+    cbShowInitialPose->setCallback(
+        [=](bool v)
+        {
             if (slIterationDetails->enabled())
             {
                 const auto& r = slIterationDetails->range();
                 slIterationDetails->setValue(v ? r.first : r.second);
             }
-            rebuild_3d_view();
+            rebuild_3d_view_fast();
         });
-        lbICPIteration     = w->add<nanogui::Label>("Show ICP iteration:");
-        slIterationDetails = w->add<nanogui::Slider>();
-        slIterationDetails->setRange({.0f, 1.0f});
-        slIterationDetails->setCallback([](float) { rebuild_3d_view(); });
+    lbICPIteration     = w->add<nanogui::Label>("Show ICP iteration:");
+    slIterationDetails = w->add<nanogui::Slider>();
+    slIterationDetails->setRange({.0f, 1.0f});
+    slIterationDetails->setCallback([](float) { rebuild_3d_view_fast(); });
 
-        //
-        w->add<nanogui::Label>(" ");  // separator
-        w->add<nanogui::Label>(mrpt::format(
-            "Select ICP record file (N=%u)",
-            static_cast<unsigned int>(logRecords.size())));
-        slSelectorICP = w->add<nanogui::Slider>();
-        slSelectorICP->setRange({.0f, logRecords.size() - 1});
-        slSelectorICP->setValue(0);
-        slSelectorICP->setCallback([&](float /*v*/) { rebuild_3d_view(); });
+    //
+    w->add<nanogui::Label>(" ");  // separator
+    w->add<nanogui::Label>(mrpt::format(
+        "Select ICP record file (N=%u)",
+        static_cast<unsigned int>(logRecords.size())));
+    slSelectorICP = w->add<nanogui::Slider>();
+    slSelectorICP->setRange({.0f, logRecords.size() - 1});
+    slSelectorICP->setValue(0);
+    slSelectorICP->setCallback([&](float /*v*/) { rebuild_3d_view(); });
 
-        for (auto& lb : lbICPStats)
-        {
-            lb = w->add<nanogui::TextBox>("  ");
-            lb->setFontSize(MID_FONT_SIZE);
-            lb->setAlignment(nanogui::TextBox::Alignment::Left);
-            lb->setEditable(true);
-        }
+    for (auto& lb : lbICPStats)
+    {
+        lb = w->add<nanogui::TextBox>("  ");
+        lb->setFontSize(MID_FONT_SIZE);
+        lb->setAlignment(nanogui::TextBox::Alignment::Left);
+        lb->setEditable(true);
+    }
 
-        // navigation panel:
-        {
-            auto pn = w->add<nanogui::Widget>();
-            pn->setLayout(
-                new nanogui::BoxLayout(nanogui::Orientation::Horizontal));
+    // navigation panel:
+    {
+        auto pn = w->add<nanogui::Widget>();
+        pn->setLayout(new nanogui::BoxLayout(nanogui::Orientation::Horizontal));
 
-            // shortcut:
-            auto s = slSelectorICP;
+        // shortcut:
+        auto s = slSelectorICP;
 
-            btnSelectorBack = pn->add<nanogui::Button>(
-                "", ENTYPO_ICON_CONTROLLER_FAST_BACKWARD);
-            btnSelectorBack->setCallback([=]() {
+        btnSelectorBack =
+            pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_FAST_BACKWARD);
+        btnSelectorBack->setCallback(
+            [=]()
+            {
                 if (s->value() > 0)
                 {
                     s->setValue(s->value() - 1);
@@ -303,9 +314,11 @@ static void main_show_gui()
                 }
             });
 
-            btnSelectorForw = pn->add<nanogui::Button>(
-                "", ENTYPO_ICON_CONTROLLER_FAST_FORWARD);
-            btnSelectorForw->setCallback([=]() {
+        btnSelectorForw =
+            pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_FAST_FORWARD);
+        btnSelectorForw->setCallback(
+            [=]()
+            {
                 if (s->value() < s->range().second - 0.01f)
                 {
                     s->setValue(s->value() + 1);
@@ -313,71 +326,73 @@ static void main_show_gui()
                 }
             });
 
-            pn->add<nanogui::Label>(" ");  // separator
+        pn->add<nanogui::Label>(" ");  // separator
 
-            btnSelectorAutoplay =
-                pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_PLAY);
-            btnSelectorAutoplay->setFlags(nanogui::Button::ToggleButton);
+        btnSelectorAutoplay =
+            pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_PLAY);
+        btnSelectorAutoplay->setFlags(nanogui::Button::ToggleButton);
 
-            btnSelectorAutoplay->setChangeCallback(
-                [&](bool active) { isAutoPlayActive = active; });
-        }
+        btnSelectorAutoplay->setChangeCallback([&](bool active)
+                                               { isAutoPlayActive = active; });
+    }
 
-        //
-        w->add<nanogui::Label>(" ");  // separator
+    //
+    w->add<nanogui::Label>(" ");  // separator
 
-        auto tabWidget = w->add<nanogui::TabWidget>();
+    auto tabWidget = w->add<nanogui::TabWidget>();
 
-        auto* tab1 = tabWidget->createTab("Summary");
-        tab1->setLayout(new nanogui::GroupLayout());
+    auto* tab1 = tabWidget->createTab("Summary");
+    tab1->setLayout(new nanogui::GroupLayout());
 
-        auto* tab2 = tabWidget->createTab("Uncertainty");
-        tab2->setLayout(new nanogui::GroupLayout());
+    auto* tab2 = tabWidget->createTab("Uncertainty");
+    tab2->setLayout(new nanogui::GroupLayout());
 
-        auto* tab3 = tabWidget->createTab("Maps");
-        tab3->setLayout(new nanogui::GroupLayout());
+    auto* tab3 = tabWidget->createTab("Maps");
+    tab3->setLayout(new nanogui::GroupLayout());
 
-        auto* tab4 = tabWidget->createTab("Pairings");
-        tab4->setLayout(new nanogui::GroupLayout());
+    auto* tab4 = tabWidget->createTab("Pairings");
+    tab4->setLayout(new nanogui::GroupLayout());
 
-        auto* tab5 = tabWidget->createTab("View");
-        tab5->setLayout(new nanogui::GroupLayout());
+    auto* tab5 = tabWidget->createTab("View");
+    tab5->setLayout(new nanogui::GroupLayout());
 
-        tabWidget->setActiveTab(0);
+    tabWidget->setActiveTab(0);
 
-        tab1->add<nanogui::Label>(
-            "ICP result pose [x y z yaw(deg) pitch(deg) roll(deg)]:");
-        tbLogPose = tab1->add<nanogui::TextBox>();
-        tbLogPose->setFontSize(MID_FONT_SIZE);
-        tbLogPose->setEditable(true);
-        tbLogPose->setAlignment(nanogui::TextBox::Alignment::Left);
+    tab1->add<nanogui::Label>(
+        "ICP result pose [x y z yaw(deg) pitch(deg) roll(deg)]:");
+    tbLogPose = tab1->add<nanogui::TextBox>();
+    tbLogPose->setFontSize(MID_FONT_SIZE);
+    tbLogPose->setEditable(true);
+    tbLogPose->setAlignment(nanogui::TextBox::Alignment::Left);
 
-        tab1->add<nanogui::Label>("Initial -> final pose change:");
-        tbInit2Final = tab1->add<nanogui::TextBox>();
-        tbInit2Final->setFontSize(MID_FONT_SIZE);
-        tbInit2Final->setEditable(false);
+    tab1->add<nanogui::Label>("Initial -> final pose change:");
+    tbInit2Final = tab1->add<nanogui::TextBox>();
+    tbInit2Final->setFontSize(MID_FONT_SIZE);
+    tbInit2Final->setEditable(false);
 
-        tab2->add<nanogui::Label>(
-            "Uncertainty: diagonal sigmas (x y z yaw pitch roll)");
-        tbCovariance = tab2->add<nanogui::TextBox>();
-        tbCovariance->setFontSize(MID_FONT_SIZE);
-        tbCovariance->setEditable(false);
+    tab2->add<nanogui::Label>(
+        "Uncertainty: diagonal sigmas (x y z yaw pitch roll)");
+    tbCovariance = tab2->add<nanogui::TextBox>();
+    tbCovariance->setFontSize(MID_FONT_SIZE);
+    tbCovariance->setEditable(false);
 
-        tab2->add<nanogui::Label>("Uncertainty: Covariance condition numbers");
-        tbConditionNumber = tab2->add<nanogui::TextBox>();
-        tbConditionNumber->setFontSize(MID_FONT_SIZE);
-        tbConditionNumber->setEditable(false);
+    tab2->add<nanogui::Label>("Uncertainty: Covariance condition numbers");
+    tbConditionNumber = tab2->add<nanogui::TextBox>();
+    tbConditionNumber->setFontSize(MID_FONT_SIZE);
+    tbConditionNumber->setEditable(false);
 
-        const float handTunedRange[6] = {4.0,        4.0,         10.0,
-                                         0.5 * M_PI, 0.25 * M_PI, 0.5};
+    const float handTunedRange[6] = {4.0,        4.0,         10.0,
+                                     0.5 * M_PI, 0.25 * M_PI, 0.5};
 
-        for (int i = 0; i < 6; i++)
-        {
-            slGTPose[i] = tab2->add<nanogui::Slider>();
-            slGTPose[i]->setRange({-handTunedRange[i], handTunedRange[i]});
-            slGTPose[i]->setValue(0.0f);
+    for (int i = 0; i < 6; i++)
+    {
+        slGTPose[i] = tab2->add<nanogui::Slider>();
+        slGTPose[i]->setRange({-handTunedRange[i], handTunedRange[i]});
+        slGTPose[i]->setValue(0.0f);
 
-            slGTPose[i]->setCallback([=](float v) {
+        slGTPose[i]->setCallback(
+            [=](float v)
+            {
                 const size_t idx = mrpt::round(slSelectorICP->value());
                 auto&        lr  = logRecords.at(idx).get();
 
@@ -385,171 +400,176 @@ static void main_show_gui()
                 p[i]   = v;
                 lr.icpResult.optimal_tf.mean = mrpt::poses::CPose3D(p);
 
-                rebuild_3d_view();
+                rebuild_3d_view_fast();
             });
-        }
+    }
 
-        tab1->add<nanogui::Label>("Initial guess pose:");
-        tbInitialGuess = tab1->add<nanogui::TextBox>();
-        tbInitialGuess->setFontSize(14);
-        tbInitialGuess->setEditable(true);
+    tab1->add<nanogui::Label>("Initial guess pose:");
+    tbInitialGuess = tab1->add<nanogui::TextBox>();
+    tbInitialGuess->setFontSize(14);
+    tbInitialGuess->setEditable(true);
 
-        // Save map buttons:
-        auto lambdaSave = [&](const mp2p_icp::metric_map_t& m) {
-            const std::string outFile = nanogui::file_dialog(
-                {{"mm",
-                  "mp2p_icp::metric_map_t binary serialized object (*.mm)"}},
-                true /*save*/);
-            if (outFile.empty()) return;
-            m.save_to_file(outFile);
-        };
+    // Save map buttons:
+    auto lambdaSave = [&](const mp2p_icp::metric_map_t& m)
+    {
+        const std::string outFile = nanogui::file_dialog(
+            {{"mm", "mp2p_icp::metric_map_t binary serialized object (*.mm)"}},
+            true /*save*/);
+        if (outFile.empty()) return;
+        m.save_to_file(outFile);
+    };
 
-        // tab 3:
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::BoxLayout(
-                nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
-            pn->add<nanogui::Button>("Export 'local' map...")
-                ->setCallback([&]() {
+    // tab 3:
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(new nanogui::BoxLayout(
+            nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
+        pn->add<nanogui::Button>("Export 'local' map...")
+            ->setCallback(
+                [&]()
+                {
                     const size_t idx = mrpt::round(slSelectorICP->value());
                     auto&        lr  = logRecords.at(idx).get();
                     ASSERT_(lr.pcLocal);
                     lambdaSave(*lr.pcLocal);
                 });
-            pn->add<nanogui::Button>("Export 'global' map...")
-                ->setCallback([&]() {
+        pn->add<nanogui::Button>("Export 'global' map...")
+            ->setCallback(
+                [&]()
+                {
                     const size_t idx = mrpt::round(slSelectorICP->value());
                     auto&        lr  = logRecords.at(idx).get();
                     ASSERT_(lr.pcGlobal);
                     lambdaSave(*lr.pcGlobal);
                 });
-        }
+    }
 
-        tab3->add<nanogui::Label>("[GLOBAL map] Visible layers:");
+    tab3->add<nanogui::Label>("[GLOBAL map] Visible layers:");
 
-        for (size_t i = 0; i < layerNames_global.size(); i++)
+    for (size_t i = 0; i < layerNames_global.size(); i++)
+    {
+        auto cb = tab3->add<nanogui::CheckBox>(layerNames_global.at(i));
+        cb->setChecked(true);
+        cb->setCallback([](bool) { rebuild_3d_view(); });
+        cb->setFontSize(13);
+
+        cbLayersByName_global[layerNames_global.at(i)] = cb;
+    }
+
+    tab3->add<nanogui::Label>("[LOCAL map] Visible layers:");
+    for (size_t i = 0; i < layerNames_local.size(); i++)
+    {
+        auto cb = tab3->add<nanogui::CheckBox>(layerNames_local.at(i));
+        cb->setChecked(true);
+        cb->setCallback([](bool) { rebuild_3d_view(); });
+        cb->setFontSize(13);
+
+        cbLayersByName_local[layerNames_local.at(i)] = cb;
+    }
+
+    // tab4: pairings:
+    tbPairings = tab4->add<nanogui::TextBox>();
+    tbPairings->setFontSize(16);
+    tbPairings->setEditable(false);
+
+    cbViewPairings = tab4->add<nanogui::CheckBox>("View pairings");
+    cbViewPairings->setCallback([](bool) { rebuild_3d_view_fast(); });
+
+    cbViewPairings_pt2pt = tab4->add<nanogui::CheckBox>("View: point-to-point");
+    cbViewPairings_pt2pt->setChecked(true);
+    cbViewPairings_pt2pt->setCallback([](bool) { rebuild_3d_view_fast(); });
+
+    {
+        auto pn = tab4->add<nanogui::Widget>();
+        pn->setLayout(new nanogui::GridLayout(
+            nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
+        cbViewPairings_pt2pl =
+            pn->add<nanogui::CheckBox>("View: point-to-plane");
+        cbViewPairings_pt2pl->setChecked(true);
+        cbViewPairings_pt2pl->setCallback([](bool) { rebuild_3d_view_fast(); });
+
+        pn->add<nanogui::Label>("Plane size:");
+        slPairingsPl2PlSize = pn->add<nanogui::Slider>();
+        slPairingsPl2PlSize->setRange({-2.0f, 2.0f});
+        slPairingsPl2PlSize->setValue(-1.0f);
+        slPairingsPl2PlSize->setCallback([&](float)
+                                         { rebuild_3d_view_fast(); });
+    }
+
+    {
+        auto pn = tab4->add<nanogui::Widget>();
+        pn->setLayout(new nanogui::GridLayout(
+            nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
+        cbViewPairings_pt2ln =
+            pn->add<nanogui::CheckBox>("View: point-to-line");
+        cbViewPairings_pt2ln->setChecked(true);
+        cbViewPairings_pt2ln->setCallback([](bool) { rebuild_3d_view_fast(); });
+
+        pn->add<nanogui::Label>("Line length:");
+        slPairingsPl2LnSize = pn->add<nanogui::Slider>();
+        slPairingsPl2LnSize->setRange({-2.0f, 2.0f});
+        slPairingsPl2LnSize->setValue(-1.0f);
+        slPairingsPl2LnSize->setCallback([&](float)
+                                         { rebuild_3d_view_fast(); });
+    }
+
+    // tab5: view
+    {
+        auto pn = tab5->add<nanogui::Widget>();
+        pn->setLayout(new nanogui::GridLayout(
+            nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        pn->add<nanogui::Label>("Point size");
+
+        slPointSize = pn->add<nanogui::Slider>();
+        slPointSize->setRange({1.0f, 10.0f});
+        slPointSize->setValue(2.0f);
+        slPointSize->setCallback([&](float) { rebuild_3d_view(); });
+    }
+
+    lbDepthFieldMid = tab5->add<nanogui::Label>("Center depth clip plane:");
+    slMidDepthField = tab5->add<nanogui::Slider>();
+    slMidDepthField->setRange({-2.0, 3.0});
+    slMidDepthField->setValue(1.0f);
+    slMidDepthField->setCallback([&](float) { rebuild_3d_view_fast(); });
+
+    lbDepthFieldThickness =
+        tab5->add<nanogui::Label>("Max-Min depth thickness:");
+    slThicknessDepthField = tab5->add<nanogui::Slider>();
+    slThicknessDepthField->setRange({-2.0, 4.0});
+    slThicknessDepthField->setValue(3.0);
+    slThicknessDepthField->setCallback([&](float) { rebuild_3d_view_fast(); });
+    lbDepthFieldValues = tab5->add<nanogui::Label>(" ");
+
+    cbViewOrtho = tab5->add<nanogui::CheckBox>("Orthogonal view");
+    cbViewOrtho->setCallback([&](bool) { rebuild_3d_view_fast(); });
+
+    cbCameraFollowsLocal =
+        tab5->add<nanogui::CheckBox>("Camera follows 'local'");
+    cbCameraFollowsLocal->setCallback([&](bool) { rebuild_3d_view_fast(); });
+
+    cbViewVoxelsAsPoints =
+        tab5->add<nanogui::CheckBox>("Render voxel maps as point clouds");
+    cbViewVoxelsAsPoints->setChecked(true);
+    cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
+
+    cbColorizeLocalMap = tab5->add<nanogui::CheckBox>("Recolorize local map");
+    cbColorizeLocalMap->setCallback([&](bool) { rebuild_3d_view(); });
+
+    cbColorizeGlobalMap = tab5->add<nanogui::CheckBox>("Recolorize global map");
+    cbColorizeGlobalMap->setCallback([&](bool) { rebuild_3d_view(); });
+
+    // ----
+    w->add<nanogui::Label>(" ");  // separator
+    w->add<nanogui::Button>("Quit", ENTYPO_ICON_ARROW_BOLD_LEFT)
+        ->setCallback([]() { win->setVisible(false); });
+
+    win->setKeyboardCallback(
+        [&](int key, [[maybe_unused]] int scancode, int action,
+            [[maybe_unused]] int modifiers)
         {
-            auto cb = tab3->add<nanogui::CheckBox>(layerNames_global.at(i));
-            cb->setChecked(true);
-            cb->setCallback([](bool) { rebuild_3d_view(); });
-            cb->setFontSize(13);
-
-            cbLayersByName_global[layerNames_global.at(i)] = cb;
-        }
-
-        tab3->add<nanogui::Label>("[LOCAL map] Visible layers:");
-        for (size_t i = 0; i < layerNames_local.size(); i++)
-        {
-            auto cb = tab3->add<nanogui::CheckBox>(layerNames_local.at(i));
-            cb->setChecked(true);
-            cb->setCallback([](bool) { rebuild_3d_view(); });
-            cb->setFontSize(13);
-
-            cbLayersByName_local[layerNames_local.at(i)] = cb;
-        }
-
-        // tab4: pairings:
-        tbPairings = tab4->add<nanogui::TextBox>();
-        tbPairings->setFontSize(16);
-        tbPairings->setEditable(false);
-
-        cbViewPairings = tab4->add<nanogui::CheckBox>("View pairings");
-
-        cbViewPairings_pt2pt =
-            tab4->add<nanogui::CheckBox>("View: point-to-point");
-        cbViewPairings_pt2pt->setChecked(true);
-        cbViewPairings_pt2pt->setCallback([](bool) { rebuild_3d_view(); });
-
-        {
-            auto pn = tab4->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
-
-            cbViewPairings_pt2pl =
-                pn->add<nanogui::CheckBox>("View: point-to-plane");
-            cbViewPairings_pt2pl->setChecked(true);
-            cbViewPairings_pt2pl->setCallback([](bool) { rebuild_3d_view(); });
-
-            pn->add<nanogui::Label>("Plane size:");
-            slPairingsPl2PlSize = pn->add<nanogui::Slider>();
-            slPairingsPl2PlSize->setRange({-2.0f, 2.0f});
-            slPairingsPl2PlSize->setValue(-1.0f);
-            slPairingsPl2PlSize->setCallback([&](float) { rebuild_3d_view(); });
-        }
-
-        {
-            auto pn = tab4->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
-
-            cbViewPairings_pt2ln =
-                pn->add<nanogui::CheckBox>("View: point-to-line");
-            cbViewPairings_pt2ln->setChecked(true);
-            cbViewPairings_pt2ln->setCallback([](bool) { rebuild_3d_view(); });
-
-            pn->add<nanogui::Label>("Line length:");
-            slPairingsPl2LnSize = pn->add<nanogui::Slider>();
-            slPairingsPl2LnSize->setRange({-2.0f, 2.0f});
-            slPairingsPl2LnSize->setValue(-1.0f);
-            slPairingsPl2LnSize->setCallback([&](float) { rebuild_3d_view(); });
-        }
-
-        // tab5: view
-        {
-            auto pn = tab5->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            pn->add<nanogui::Label>("Point size");
-
-            slPointSize = pn->add<nanogui::Slider>();
-            slPointSize->setRange({1.0f, 10.0f});
-            slPointSize->setValue(2.0f);
-            slPointSize->setCallback([&](float) { rebuild_3d_view(); });
-        }
-
-        lbDepthFieldMid = tab5->add<nanogui::Label>("Center depth clip plane:");
-        slMidDepthField = tab5->add<nanogui::Slider>();
-        slMidDepthField->setRange({-2.0, 3.0});
-        slMidDepthField->setValue(1.0f);
-        slMidDepthField->setCallback([&](float) { rebuild_3d_view(); });
-
-        lbDepthFieldThickness =
-            tab5->add<nanogui::Label>("Max-Min depth thickness:");
-        slThicknessDepthField = tab5->add<nanogui::Slider>();
-        slThicknessDepthField->setRange({-2.0, 4.0});
-        slThicknessDepthField->setValue(3.0);
-        slThicknessDepthField->setCallback([&](float) { rebuild_3d_view(); });
-        lbDepthFieldValues = tab5->add<nanogui::Label>(" ");
-
-        cbViewOrtho = tab5->add<nanogui::CheckBox>("Orthogonal view");
-        cbViewOrtho->setCallback([&](bool) { rebuild_3d_view(); });
-
-        cbCameraFollowsLocal =
-            tab5->add<nanogui::CheckBox>("Camera follows 'local'");
-        cbCameraFollowsLocal->setCallback([&](bool) { rebuild_3d_view(); });
-
-        cbViewVoxelsAsPoints =
-            tab5->add<nanogui::CheckBox>("Render voxel maps as point clouds");
-        cbViewVoxelsAsPoints->setChecked(true);
-        cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
-
-        cbColorizeLocalMap =
-            tab5->add<nanogui::CheckBox>("Recolorize local map");
-        cbColorizeLocalMap->setCallback([&](bool) { rebuild_3d_view(); });
-
-        cbColorizeGlobalMap =
-            tab5->add<nanogui::CheckBox>("Recolorize global map");
-        cbColorizeGlobalMap->setCallback([&](bool) { rebuild_3d_view(); });
-
-        // ----
-        w->add<nanogui::Label>(" ");  // separator
-        w->add<nanogui::Button>("Quit", ENTYPO_ICON_ARROW_BOLD_LEFT)
-            ->setCallback([]() { win->setVisible(false); });
-
-        win->setKeyboardCallback([&](int key, [[maybe_unused]] int scancode,
-                                     int                  action,
-                                     [[maybe_unused]] int modifiers) {
             if (action != GLFW_PRESS && action != GLFW_REPEAT) return false;
 
             int increment = 0;
@@ -585,13 +605,86 @@ static void main_show_gui()
 
             return false;
         });
-    }
 
     win->performLayout();
     win->camera().setCameraPointing(8.0f, .0f, .0f);
     win->camera().setAzimuthDegrees(110.0f);
     win->camera().setElevationDegrees(15.0f);
     win->camera().setZoomDistance(30.0f);
+
+    // save and load UI state:
+#define LOAD_CB_STATE(CB_NAME__) do_cb(CB_NAME__, #CB_NAME__)
+#define SAVE_CB_STATE(CB_NAME__) \
+    appCfg.write("", #CB_NAME__, CB_NAME__->checked())
+
+#define LOAD_SL_STATE(SL_NAME__) do_sl(SL_NAME__, #SL_NAME__)
+#define SAVE_SL_STATE(SL_NAME__) \
+    appCfg.write("", #SL_NAME__, SL_NAME__->value())
+
+    auto load_UI_state_from_user_config = [&]()
+    {
+        auto do_cb = [&](nanogui::CheckBox* cb, const std::string& name)
+        { cb->setChecked(appCfg.read_bool("", name, cb->checked())); };
+        auto do_sl = [&](nanogui::Slider* sl, const std::string& name)
+        { sl->setValue(appCfg.read_float("", name, sl->value())); };
+
+        LOAD_CB_STATE(cbColorizeLocalMap);
+        LOAD_CB_STATE(cbColorizeGlobalMap);
+        LOAD_CB_STATE(cbShowInitialPose);
+        LOAD_CB_STATE(cbViewOrtho);
+        LOAD_CB_STATE(cbCameraFollowsLocal);
+        LOAD_CB_STATE(cbViewVoxelsAsPoints);
+        LOAD_CB_STATE(cbViewPairings);
+        LOAD_CB_STATE(cbViewPairings_pt2pt);
+        LOAD_CB_STATE(cbViewPairings_pt2pl);
+        LOAD_CB_STATE(cbViewPairings_pt2ln);
+
+        LOAD_SL_STATE(slPairingsPl2PlSize);
+        LOAD_SL_STATE(slPairingsPl2LnSize);
+        LOAD_SL_STATE(slPointSize);
+        LOAD_SL_STATE(slMidDepthField);
+        LOAD_SL_STATE(slThicknessDepthField);
+
+        win->camera().setCameraPointing(
+            appCfg.read_float("", "cam_x", win->camera().getCameraPointingX()),
+            appCfg.read_float("", "cam_y", win->camera().getCameraPointingY()),
+            appCfg.read_float("", "cam_z", win->camera().getCameraPointingZ()));
+        win->camera().setAzimuthDegrees(
+            appCfg.read_float("", "cam_az", win->camera().getAzimuthDegrees()));
+        win->camera().setElevationDegrees(appCfg.read_float(
+            "", "cam_el", win->camera().getElevationDegrees()));
+        win->camera().setZoomDistance(
+            appCfg.read_float("", "cam_d", win->camera().getZoomDistance()));
+    };
+    auto save_UI_state_to_user_config = [&]()
+    {
+        SAVE_CB_STATE(cbColorizeLocalMap);
+        SAVE_CB_STATE(cbColorizeGlobalMap);
+        SAVE_CB_STATE(cbShowInitialPose);
+        SAVE_CB_STATE(cbViewOrtho);
+        SAVE_CB_STATE(cbCameraFollowsLocal);
+        SAVE_CB_STATE(cbViewVoxelsAsPoints);
+        SAVE_CB_STATE(cbViewPairings);
+        SAVE_CB_STATE(cbViewPairings_pt2pt);
+        SAVE_CB_STATE(cbViewPairings_pt2pl);
+        SAVE_CB_STATE(cbViewPairings_pt2ln);
+
+        SAVE_SL_STATE(slPairingsPl2PlSize);
+        SAVE_SL_STATE(slPairingsPl2LnSize);
+        SAVE_SL_STATE(slPointSize);
+        SAVE_SL_STATE(slMidDepthField);
+        SAVE_SL_STATE(slThicknessDepthField);
+
+        appCfg.write("", "cam_x", win->camera().getCameraPointingX());
+        appCfg.write("", "cam_y", win->camera().getCameraPointingY());
+        appCfg.write("", "cam_z", win->camera().getCameraPointingZ());
+        appCfg.write("", "cam_az", win->camera().getAzimuthDegrees());
+        appCfg.write("", "cam_el", win->camera().getElevationDegrees());
+        appCfg.write("", "cam_d", win->camera().getZoomDistance());
+    };
+
+    // load UI state from last session:
+    load_UI_state_from_user_config();
 
     rebuild_3d_view();
 
@@ -600,24 +693,29 @@ static void main_show_gui()
     win->drawAll();
     win->setVisible(true);
 
-    win->addLoopCallback([&]() {
-        if (!isAutoPlayActive) return;
-
-        const double tNow = mrpt::Clock::nowDouble();
-        if (tNow - lastAutoPlayTime < argAutoPlayPeriod.getValue()) return;
-
-        lastAutoPlayTime = tNow;
-
-        if (slSelectorICP->value() < slSelectorICP->range().second - 0.01f)
+    win->addLoopCallback(
+        [&]()
         {
-            slSelectorICP->setValue(slSelectorICP->value() + 1);
-            rebuild_3d_view();
-        }
-    });
+            if (!isAutoPlayActive) return;
+
+            const double tNow = mrpt::Clock::nowDouble();
+            if (tNow - lastAutoPlayTime < argAutoPlayPeriod.getValue()) return;
+
+            lastAutoPlayTime = tNow;
+
+            if (slSelectorICP->value() < slSelectorICP->range().second - 0.01f)
+            {
+                slSelectorICP->setValue(slSelectorICP->value() + 1);
+                rebuild_3d_view();
+            }
+        });
 
     nanogui::mainloop(10 /*refresh Hz*/);
 
     nanogui::shutdown();
+
+    // save UI state:
+    save_UI_state_to_user_config();
 }
 
 template <class MATRIX>  //
@@ -632,7 +730,7 @@ double conditionNumber(const MATRIX& m)
 // ==============================
 // rebuild_3d_view
 // ==============================
-void rebuild_3d_view()
+void rebuild_3d_view(bool regenerateMaps)
 {
     using namespace std::string_literals;
 
@@ -838,18 +936,27 @@ void rebuild_3d_view()
         }
     }
 
+    static mrpt::opengl::CSetOfObjects::Ptr lastGlobalPts;
+
+    if (!lastGlobalPts || regenerateMaps)
     {
         // Show all or selected layers:
         for (auto& rpL : rpGlobal.points.perLayer)
             rpL.second.color = mrpt::img::TColor(0xff, 0x00, 0x00, 0xff);
 
-        auto glPts = lr.pcGlobal->get_visualization(rpGlobal);
+        auto glPts    = lr.pcGlobal->get_visualization(rpGlobal);
+        lastGlobalPts = glPts;
 
         // Show all or selected layers:
         rpGlobal.points.allLayers.color =
             mrpt::img::TColor(0xff, 0x00, 0x00, 0xff);
 
         glVizICP->insert(glPts);
+    }
+    else
+    {
+        // avoid the costly method of re-rendering maps, if possible:
+        glVizICP->insert(lastGlobalPts);
     }
 
     // LOCAL PC:
@@ -897,16 +1004,25 @@ void rebuild_3d_view()
         }
     }
 
+    static mrpt::opengl::CSetOfObjects::Ptr lastLocalPts;
+
+    if (!lastLocalPts || regenerateMaps)
     {
         // Show all or selected layers:
         for (auto& rpL : rpLocal.points.perLayer)
             rpL.second.color = mrpt::img::TColor(0x00, 0x00, 0xff, 0xff);
 
-        auto glPts = lr.pcLocal->get_visualization(rpLocal);
+        auto glPts   = lr.pcLocal->get_visualization(rpLocal);
+        lastLocalPts = glPts;
 
-        glPts->setPose(relativePose.mean);
         glVizICP->insert(glPts);
     }
+    else
+    {
+        // avoid the costly method of re-rendering maps, if possible:
+        glVizICP->insert(lastLocalPts);
+    }
+    lastLocalPts->setPose(relativePose.mean);
 
     // Global view options:
     {
