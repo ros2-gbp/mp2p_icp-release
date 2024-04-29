@@ -7,8 +7,8 @@
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
 
-# Minimum CMake vesion: limited by CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS
-cmake_minimum_required(VERSION 3.4)
+# Minimum CMake version: deprecated if <3.5 (as of Apr 2024)
+cmake_minimum_required(VERSION 3.5)
 
 if("$ENV{ROS_VERSION}" STREQUAL "2")
 	set(DETECTED_ROS2 TRUE)
