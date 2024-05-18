@@ -38,14 +38,22 @@ class QualityEvaluator_PairedRatio : public QualityEvaluator
      */
     void initialize(const mrpt::containers::yaml& params) override;
 
-    double evaluate(
+    Result evaluate(
         const metric_map_t& pcGlobal, const metric_map_t& pcLocal,
         const mrpt::poses::CPose3D& localPose,
         const Pairings&             pairingsFromICP) const override;
 
+    void attachToParameterSource(ParameterSource& source) override
+    {
+        source.attach(*this);
+        source.attach(matcher_);
+    }
+
    private:
     Matcher_Points_DistanceThreshold matcher_;
     bool                             reuse_icp_pairings = true;
+
+    double absolute_minimum_pairing_ratio = 0.20;
 };
 
 }  // namespace mp2p_icp
