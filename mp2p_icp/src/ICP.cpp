@@ -123,6 +123,7 @@ void ICP::align(
         // ...and via programmable formulas:
         for (auto& obj : matchers_) lambdaAddOwnParams(*obj);
         for (auto& obj : solvers_) lambdaAddOwnParams(*obj);
+        for (auto& [obj, _] : quality_evaluators_) lambdaAddOwnParams(*obj);
         lambdaRealizeParamSources();
 
         // Matchings
@@ -532,9 +533,12 @@ double ICP::evaluate_quality(
     {
         const double w = e.relativeWeight;
         ASSERT_GT_(w, 0);
-        const double eval =
+        const auto evalResult =
             e.obj->evaluate(pcGlobal, pcLocal, localPose, finalPairings);
-        sumEvals += w * eval;
+
+        if (evalResult.hard_discard) return 0;  // hard limit
+
+        sumEvals += w * evalResult.quality;
         sumW += w;
     }
     ASSERT_(sumW > 0);
