@@ -8,6 +8,7 @@
 #include <mrpt/core/get_env.h>
 #include <mrpt/serialization/CArchive.h>
 #include <mrpt/serialization/stl_serialization.h>
+#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(Parameters, mrpt::serialization::CSerializable, mp2p_icp)
 
@@ -65,6 +66,36 @@ void Parameters::load_from(const mrpt::containers::yaml& p)
     MCP_LOAD_OPT(p, decimationDebugFiles);
     MCP_LOAD_OPT(p, saveIterationDetails);
     MCP_LOAD_OPT(p, decimationIterationDetails);
+
+    if (p.has("quality_checkpoints"))
+    {
+        ASSERT_(
+            p["quality_checkpoints"].isSequence() &&
+#if MRPT_VERSION >= 0x020d00
+            !p["quality_checkpoints"].asSequenceRange().empty()
+#else
+            !p["quality_checkpoints"].asSequence().empty()
+#endif
+        );
+
+        quality_checkpoints.clear();
+#if MRPT_VERSION >= 0x020d00
+        for (const auto& e : p["quality_checkpoints"].asSequenceRange())
+#else
+        for (const auto& e : p["quality_checkpoints"].asSequence())
+#endif
+
+        {
+            ASSERTMSG_(
+                e.isMap(),
+                "Entries within 'quality_checkpoints' must be a Map. See "
+                "mp2p_icp::Parameters docs.");
+
+            quality_checkpoints.emplace(
+                e.asMap().at("iteration").as<size_t>(),
+                e.asMap().at("minimum_quality").as<double>());
+        }
+    }
 
     generateDebugFiles = generateDebugFiles || MP2P_ICP_GENERATE_DEBUG_FILES;
 }
