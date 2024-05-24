@@ -36,7 +36,7 @@ IMPLEMENTS_MRPT_OBJECT(
 using namespace mp2p_icp;
 
 // Implementation of the CSerializable virtual interface:
-uint8_t metric_map_t::serializeGetVersion() const { return 2; }
+uint8_t metric_map_t::serializeGetVersion() const { return 3; }
 void    metric_map_t::serializeTo(mrpt::serialization::CArchive& out) const
 {
     out << lines;
@@ -59,6 +59,8 @@ void    metric_map_t::serializeTo(mrpt::serialization::CArchive& out) const
         out << georeferencing->geo_coord.lat.decimal_value
             << georeferencing->geo_coord.lon.decimal_value
             << georeferencing->geo_coord.height << georeferencing->T_enu_to_map;
+        // v3: T_enu_to_map: mrpt::poses::CPose3D =>
+        // mrpt::poses::CPose3DPDFGaussian
     }
 
     // Optional user data:
@@ -72,6 +74,7 @@ void metric_map_t::serializeFrom(
         case 0:
         case 1:
         case 2:
+        case 3:
         {
             in >> lines;
             const auto nPls = in.ReadAs<uint32_t>();
@@ -103,8 +106,9 @@ void metric_map_t::serializeFrom(
             {
                 auto& g = georeferencing.emplace();
                 in >> g.geo_coord.lat.decimal_value >>
-                    g.geo_coord.lon.decimal_value >> g.geo_coord.height >>
-                    g.T_enu_to_map;
+                    g.geo_coord.lon.decimal_value >> g.geo_coord.height;
+                if (version >= 3) { in >> g.T_enu_to_map; }
+                else { in >> g.T_enu_to_map.mean; }
             }
             else
                 georeferencing.reset();
@@ -243,10 +247,7 @@ void metric_map_t::get_visualization_map_layer(
             return;
         }
     }
-    else
-    {
-        pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(map);
-    }
+    else { pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(map); }
 
     if (!pts ||
         (p.colorMode.has_value() && p.colorMode->keep_original_cloud_color))
@@ -314,9 +315,10 @@ void metric_map_t::get_visualization_map_layer(
                 mrpt::math::CHistogram(bb.min.z, bb.max.z, nBins)};
 
             const auto lambdaVisitPoints =
-                [&hists](const mrpt::math::TPoint3Df& pt) {
-                    for (int i = 0; i < 3; i++) hists[i].add(pt[i]);
-                };
+                [&hists](const mrpt::math::TPoint3Df& pt)
+            {
+                for (int i = 0; i < 3; i++) hists[i].add(pt[i]);
+            };
 
             for (size_t i = 0; i < pts->size(); i++)
             {
@@ -382,7 +384,9 @@ void metric_map_t::merge_with(
     {
         std::transform(
             otherPc.lines.begin(), otherPc.lines.end(),
-            std::back_inserter(lines), [&](const mrpt::math::TLine3D& l) {
+            std::back_inserter(lines),
+            [&](const mrpt::math::TLine3D& l)
+            {
                 return mrpt::math::TLine3D::FromPointAndDirector(
                     pose.composePoint(l.pBase),
                     pose.rotateVector(l.getDirectorVector()));
@@ -400,7 +404,9 @@ void metric_map_t::merge_with(
     {
         std::transform(
             otherPc.planes.begin(), otherPc.planes.end(),
-            std::back_inserter(planes), [&](const plane_patch_t& l) {
+            std::back_inserter(planes),
+            [&](const plane_patch_t& l)
+            {
                 plane_patch_t g;
                 g.centroid = pose.composePoint(l.centroid);
 
@@ -513,7 +519,8 @@ std::string metric_map_t::contents_summary() const
 
     if (empty()) return {ret + "empty"s};
 
-    const auto retAppend = [&ret](const std::string& s) {
+    const auto retAppend = [&ret](const std::string& s)
+    {
         if (!ret.empty()) ret += ", "s;
         ret += s;
     };
@@ -522,6 +529,7 @@ std::string metric_map_t::contents_summary() const
     if (!planes.empty()) retAppend(std::to_string(planes.size()) + " planes"s);
 
     size_t nPts = 0, nVoxels = 0;
+    bool   otherLayers = false;
     for (const auto& layer : layers)
     {
         ASSERT_(layer.second);
@@ -537,9 +545,11 @@ std::string metric_map_t::contents_summary() const
         {
             nVoxels += vxs->grid().activeCellsCount();
         }
+        else
+            otherLayers = true;
     }
 
-    if (nPts != 0 || nVoxels != 0)
+    if (nPts != 0 || nVoxels != 0 || otherLayers)
     {
         retAppend(
             mrpt::system::unitsFormat(static_cast<double>(nPts), 2, false) +
