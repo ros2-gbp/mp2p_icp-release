@@ -123,6 +123,7 @@ void ICP::align(
         // ...and via programmable formulas:
         for (auto& obj : matchers_) lambdaAddOwnParams(*obj);
         for (auto& obj : solvers_) lambdaAddOwnParams(*obj);
+        for (auto& [obj, _] : quality_evaluators_) lambdaAddOwnParams(*obj);
         lambdaRealizeParamSources();
 
         // Matchings
@@ -253,6 +254,35 @@ void ICP::align(
             }
 
             break;
+        }
+
+        // Quality checkpoints to abort ICP iterations as useless?
+        if (auto itQ = p.quality_checkpoints.find(state.currentIteration);
+            itQ != p.quality_checkpoints.end())
+        {
+            const double minQuality = itQ->second;
+
+            for (auto& e : quality_evaluators_) lambdaAddOwnParams(*e.obj);
+            lambdaRealizeParamSources();
+
+            const double quality = evaluate_quality(
+                quality_evaluators_, pcGlobal, pcLocal,
+                state.currentSolution.optimalPose, state.currentPairings);
+
+            if (quality < minQuality)
+            {
+                result.terminationReason =
+                    IterTermReason::QualityCheckpointFailed;
+                if (p.debugPrintIterationProgress)
+                {
+                    printf(
+                        "[ICP] Iter=%3u quality checkpoint did not pass: %f < "
+                        "%f\n",
+                        static_cast<unsigned int>(state.currentIteration),
+                        quality, minQuality);
+                }
+                break;  // abort ICP
+            }
         }
 
         prev2_solution = prev_solution;
@@ -503,9 +533,12 @@ double ICP::evaluate_quality(
     {
         const double w = e.relativeWeight;
         ASSERT_GT_(w, 0);
-        const double eval =
+        const auto evalResult =
             e.obj->evaluate(pcGlobal, pcLocal, localPose, finalPairings);
-        sumEvals += w * eval;
+
+        if (evalResult.hard_discard) return 0;  // hard limit
+
+        sumEvals += w * evalResult.quality;
         sumW += w;
     }
     ASSERT_(sumW > 0);
