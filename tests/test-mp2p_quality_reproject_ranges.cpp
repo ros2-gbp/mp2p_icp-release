@@ -18,12 +18,11 @@
 #include <mrpt/maps/CSimplePointsMap.h>
 
 #include <cstdlib>
-#include <sstream>
-
-const std::string datasetDir = MP2P_DATASET_DIR;
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
+    const std::string datasetDir = MP2P_DATASET_DIR;
+
     try
     {
         const auto inFile = std::string("happy_buddha_decim.xyz.gz");
@@ -85,7 +84,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
             mp2p_icp::metric_map_t pcL;
             pcL.layers[mp2p_icp::metric_map_t::PT_LAYER_RAW] = p2;
 
-            const double quality = q.evaluate(pcG, pcL, relPoseTest, {});
+            const auto   res     = q.evaluate(pcG, pcL, relPoseTest, {});
+            const double quality = res.quality;
 
             if (std::abs(quality - expectedVal) > 0.1)
             {
