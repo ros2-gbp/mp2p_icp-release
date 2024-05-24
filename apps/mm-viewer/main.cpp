@@ -52,6 +52,8 @@ static TCLAP::ValueArg<std::string> arg_plugins(
 
 auto glVizMap = mrpt::opengl::CSetOfObjects::Create();
 auto glGrid   = mrpt::opengl::CGridPlaneXY::Create();
+mrpt::opengl::CSetOfObjects::Ptr glENUCorner, glMapCorner;
+
 mrpt::gui::CDisplayWindowGUI::Ptr win;
 
 std::array<nanogui::TextBox*, 2> lbMapStats                = {nullptr, nullptr};
@@ -127,10 +129,14 @@ static void main_show_gui()
         scene->insert(glGrid);
     }
 
-    auto gl_base = mrpt::opengl::stock_objects::CornerXYZ(1.0f);
-    gl_base->setName("map");
-    gl_base->enableShowName();
-    scene->insert(gl_base);
+    glMapCorner = mrpt::opengl::stock_objects::CornerXYZ(1.0f);
+    glMapCorner->setName("map");
+    glMapCorner->enableShowName();
+
+    glENUCorner = mrpt::opengl::stock_objects::CornerXYZ(2.0f);
+    glENUCorner->setName("ENU");
+    glENUCorner->enableShowName();
+    scene->insert(glENUCorner);
 
     scene->insert(glVizMap);
 
@@ -202,18 +208,32 @@ static void main_show_gui()
             slPointSize->setCallback([&](float) { rebuild_3d_view(); });
         }
 
-        lbDepthFieldMid = tab1->add<nanogui::Label>("Center depth clip plane:");
-        slMidDepthField = tab1->add<nanogui::Slider>();
-        slMidDepthField->setRange({-2.0, 3.0});
-        slMidDepthField->setValue(1.0f);
-        slMidDepthField->setCallback([&](float) { rebuild_3d_view(); });
+        {
+            auto pn = tab1->add<nanogui::Widget>();
+            pn->setLayout(new nanogui::GridLayout(
+                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
 
-        lbDepthFieldThickness =
-            tab1->add<nanogui::Label>("Max-Min depth thickness:");
-        slThicknessDepthField = tab1->add<nanogui::Slider>();
-        slThicknessDepthField->setRange({-2.0, 4.0});
-        slThicknessDepthField->setValue(3.0);
-        slThicknessDepthField->setCallback([&](float) { rebuild_3d_view(); });
+            lbDepthFieldMid =
+                pn->add<nanogui::Label>("Center depth clip plane:");
+            slMidDepthField = pn->add<nanogui::Slider>();
+            slMidDepthField->setRange({-2.0, 3.0});
+            slMidDepthField->setValue(1.0f);
+            slMidDepthField->setCallback([&](float) { rebuild_3d_view(); });
+        }
+
+        {
+            auto pn = tab1->add<nanogui::Widget>();
+            pn->setLayout(new nanogui::GridLayout(
+                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+            lbDepthFieldThickness =
+                pn->add<nanogui::Label>("Max-Min depth thickness:");
+            slThicknessDepthField = pn->add<nanogui::Slider>();
+            slThicknessDepthField->setRange({-2.0, 6.0});
+            slThicknessDepthField->setValue(3.0);
+            slThicknessDepthField->setCallback([&](float)
+                                               { rebuild_3d_view(); });
+        }
         lbDepthFieldValues = tab1->add<nanogui::Label>(" ");
 
         lbCameraFOV = tab1->add<nanogui::Label>("Camera FOV:");
@@ -464,13 +484,22 @@ void rebuild_3d_view()
             mrpt::img::TColor(0xff, 0x00, 0x00, 0xff);
 
         glVizMap->insert(glPts);
+
+        glVizMap->insert(glMapCorner);
     }
 
     if (cbApplyGeoRef->checked() && theMap.georeferencing.has_value())
     {
-        glVizMap->setPose(theMap.georeferencing->T_enu_to_map);
+        glVizMap->setPose(theMap.georeferencing->T_enu_to_map.mean);
+        glGrid->setPose(theMap.georeferencing->T_enu_to_map.mean);
+        glENUCorner->setVisibility(true);
     }
-    else { glVizMap->setPose(mrpt::poses::CPose3D::Identity()); }
+    else
+    {
+        glVizMap->setPose(mrpt::poses::CPose3D::Identity());
+        glGrid->setPose(mrpt::poses::CPose3D::Identity());
+        glENUCorner->setVisibility(false);
+    }
 
     // ground grid:
     if (mapBbox)
@@ -503,13 +532,18 @@ void rebuild_3d_view()
 
         const float cameraFOV = slCameraFOV->value();
         win->camera().setCameraFOV(cameraFOV);
+        win->camera().setMaximumZoom(std::max<double>(1000, 3.0 * clipFar));
 
-        lbDepthFieldMid->setCaption(
-            mrpt::format("Center depth clip plane: %f", depthFieldMid));
-        lbDepthFieldThickness->setCaption(
-            mrpt::format("Max-Min depth thickness: %f", depthFieldThickness));
         lbDepthFieldValues->setCaption(
             mrpt::format("Depth field: near=%f far=%f", clipNear, clipFar));
+        lbDepthFieldMid->setCaption(
+            mrpt::format("Frustrum depth center: %.03f", depthFieldMid));
+        lbDepthFieldThickness->setCaption(mrpt::format(
+            "Frustum depth thickness: %.03f", depthFieldThickness));
+
+        lbDepthFieldValues->setCaption(
+            mrpt::format("Frustum: near=%.02f far=%.02f", clipNear, clipFar));
+
         lbCameraFOV->setCaption(
             mrpt::format("Camera FOV: %.02f deg", cameraFOV));
 
