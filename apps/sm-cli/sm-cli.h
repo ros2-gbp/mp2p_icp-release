@@ -41,8 +41,29 @@ struct cli_flags
     TCLAP::ValueArg<size_t> arg_to{"",         "to", "Last KF index", false, 0,
                                    "KF index", cmd};
 
+    TCLAP::ValueArg<std::string> arg_min_corner{
+        "",    "min-corner", "Bounding box minimum coordinates",
+        false, "",           "\"[xmin ymin zmin]\"",
+        cmd};
+
+    TCLAP::ValueArg<std::string> arg_max_corner{
+        "",    "max-corner", "Bounding box maximum coordinates",
+        false, "",           "\"[xmax ymax zmax]\"",
+        cmd};
+
     TCLAP::ValueArg<std::string> arg_output{
         "o", "output", "Output file", false, "output", "output", cmd};
+
+    TCLAP::ValueArg<std::string> arg_output_twist{
+        "",
+        "output-twist",
+        "Output file for twist (linear and angular velocity). Output file will "
+        "contain one row per frame, with these fields: "
+        "'time vx vy vz wx wy wz'",
+        false,
+        "",
+        "twist.txt",
+        cmd};
 
     TCLAP::SwitchArg argHelp{
         "h", "help", "Shows more detailed help for command", cmd};
@@ -60,6 +81,7 @@ void printVersion();  // "--version"
 int  commandCut();  // "cut"
 int  commandInfo();  // "info"
 int  commandLevel();  // "level"
+int  commandTrim();  // "trim"
 int  commandExportKF();  // "export-keyframes"
 int  commandExportRawlog();  // "export-rawlog"
 
