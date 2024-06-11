@@ -15,6 +15,7 @@
 #include <mrpt/core/exceptions.h>
 #include <mrpt/core/lock_helper.h>
 #include <mrpt/poses/Lie/SE.h>
+#include <mrpt/system/filesystem.h>
 #include <mrpt/tfest/se3.h>
 
 #include <regex>
@@ -323,15 +324,30 @@ void ICP::align(
     // ----------------------------
     mrpt::system::CTimeLoggerEntry tle8(profiler_, "align.5_save_log");
 
-    // Store results into log struct:
-    if (currentLog) currentLog->icpResult = result;
+    if (currentLog)
+    {
+        // Store results into log struct:
+        currentLog->icpResult = result;
 
-    // Save log to disk:
-    if (currentLog.has_value()) save_log_file(*currentLog, p);
+        // Store dynamic variables:
+        if (!matchers().empty())
+        {
+            currentLog->dynamicVariables = matchers()
+                                               .begin()
+                                               ->get()
+                                               ->attachedSource()
+                                               ->getVariableValues();
+        }
 
-    // return log info:
-    if (currentLog && outputDebugInfo.has_value())
-        outputDebugInfo.value().get() = std::move(currentLog.value());
+        currentLog->icpResult = result;
+
+        // Save log to disk (if enabled):
+        save_log_file(*currentLog, p);
+
+        // return log info:
+        if (outputDebugInfo.has_value())
+            outputDebugInfo.value().get() = std::move(currentLog.value());
+    }
 
     MRPT_END
 }
@@ -399,11 +415,31 @@ void ICP::save_log_file(const LogRecord& log, const Parameters& p)
         filename = std::regex_replace(filename, std::regex(expr), value);
     }
 
+    // make sure directory exist:
+    const auto baseDir = mrpt::system::extractFileDirectory(filename);
+    if (!mrpt::system::directoryExists(baseDir))
+    {
+        const bool ok = mrpt::system::createDirectory(baseDir);
+        if (!ok)
+        {
+            std::cerr << "[ICP::save_log_file] Could not create directory to "
+                         "save icp log file: '"
+                      << baseDir << "'" << std::endl;
+        }
+        else
+        {
+            std::cerr
+                << "[ICP::save_log_file] Created output directory for logs: '"
+                << baseDir << "'" << std::endl;
+        }
+    }
+
+    // Save it:
     const bool saveOk = log.save_to_file(filename);
     if (!saveOk)
     {
-        std::cerr << "[ERROR] Could not save icp log file to '" << filename
-                  << "'" << std::endl;
+        std::cerr << "[ICP::save_log_file] Could not save icp log file to '"
+                  << filename << "'" << std::endl;
     }
 }
 
