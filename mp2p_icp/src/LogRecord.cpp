@@ -16,7 +16,7 @@ IMPLEMENTS_MRPT_OBJECT(LogRecord, mrpt::serialization::CSerializable, mp2p_icp)
 using namespace mp2p_icp;
 
 // Implementation of the CSerializable virtual interface:
-uint8_t LogRecord::serializeGetVersion() const { return 0; }
+uint8_t LogRecord::serializeGetVersion() const { return 1; }
 void    LogRecord::serializeTo(mrpt::serialization::CArchive& out) const
 {
     if (pcGlobal)
@@ -24,23 +24,18 @@ void    LogRecord::serializeTo(mrpt::serialization::CArchive& out) const
         out.WriteAs<bool>(true);
         out << *pcGlobal;
     }
-    else
-    {
-        out.WriteAs<bool>(false);
-    }
+    else { out.WriteAs<bool>(false); }
     if (pcLocal)
     {
         out.WriteAs<bool>(true);
         out << *pcLocal;
     }
-    else
-    {
-        out.WriteAs<bool>(false);
-    }
+    else { out.WriteAs<bool>(false); }
     out << initialGuessLocalWrtGlobal;
     out << icpParameters;
     out << icpResult;
     out << iterationsDetails;
+    out << dynamicVariables;  // added in v1
 }
 void LogRecord::serializeFrom(
     mrpt::serialization::CArchive& in, uint8_t version)
@@ -50,6 +45,7 @@ void LogRecord::serializeFrom(
     switch (version)
     {
         case 0:
+        case 1:
         {
             if (in.ReadAs<bool>())
             {
@@ -64,6 +60,11 @@ void LogRecord::serializeFrom(
 
             in >> initialGuessLocalWrtGlobal >> icpParameters >> icpResult >>
                 iterationsDetails;
+
+            if (version >= 1)
+                in >> dynamicVariables;
+            else
+                dynamicVariables.clear();
         }
         break;
         default:
@@ -73,24 +74,40 @@ void LogRecord::serializeFrom(
 
 bool LogRecord::save_to_file(const std::string& fileName) const
 {
-    auto f = mrpt::io::CFileGZOutputStream(fileName);
-    if (!f.is_open()) return false;
+    try
+    {
+        auto f = mrpt::io::CFileGZOutputStream(fileName);
+        if (!f.is_open()) return false;
 
-    auto arch = mrpt::serialization::archiveFrom(f);
-    arch << *this;
+        auto arch = mrpt::serialization::archiveFrom(f);
+        arch << *this;
 
-    return true;
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[LogRecord::save_to_file] Error: " << e.what();
+        return false;
+    }
 }
 
 bool LogRecord::load_from_file(const std::string& fileName)
 {
-    auto f = mrpt::io::CFileGZInputStream(fileName);
-    if (!f.is_open()) return false;
+    try
+    {
+        auto f = mrpt::io::CFileGZInputStream(fileName);
+        if (!f.is_open()) return false;
 
-    auto arch = mrpt::serialization::archiveFrom(f);
-    arch >> *this;
+        auto arch = mrpt::serialization::archiveFrom(f);
+        arch >> *this;
 
-    return true;
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[LogRecord::save_to_file] Error: " << e.what();
+        return false;
+    }
 }
 
 static const uint8_t DIPI_SERIALIZATION_VERSION = 0;
