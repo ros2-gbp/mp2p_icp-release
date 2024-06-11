@@ -10,11 +10,16 @@
  * @date   Sep 10, 2021
  */
 
+#include <mp2p_icp/pointcloud_sanity_check.h>
 #include <mp2p_icp_filters/FilterDecimateVoxels.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/math/ops_containers.h>  // dotProduct
 #include <mrpt/random/RandomGenerators.h>
+
+//
+#include <mrpt/maps/CPointsMapXYZI.h>
+#include <mrpt/maps/CPointsMapXYZIRT.h>
 
 IMPLEMENTS_MRPT_OBJECT(
     FilterDecimateVoxels, mp2p_icp_filters::FilterBase, mp2p_icp_filters)
@@ -192,6 +197,9 @@ void FilterDecimateVoxels::filter(mp2p_icp::metric_map_t& inOut) const
         {
             const auto& pc = *pcPtr;
             grid.processPointCloud(pc);
+
+            const bool sanityPassed = mp2p_icp::pointcloud_sanity_check(pc);
+            ASSERT_(sanityPassed);
         }
 
         // 2nd) collect grid results:
