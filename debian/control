@@ -1,0 +1,12 @@
+Source: ros-rolling-mp2p-icp
+Section: misc
+Priority: optional
+Maintainer: Jose-Luis Blanco-Claraco <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, ros-rolling-mola-common, ros-rolling-mrpt2, ros-rolling-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-rolling-mp2p-icp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-rolling-mola-common, ros-rolling-mrpt2, ros-rolling-ros-workspace
+Description: A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
