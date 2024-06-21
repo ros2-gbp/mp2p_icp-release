@@ -15,9 +15,11 @@
  *
  */
 
+#include <mp2p_icp_filters/FilterAdjustTimestamps.h>
 #include <mp2p_icp_filters/FilterBoundingBox.h>
 #include <mp2p_icp_filters/FilterByIntensity.h>
 #include <mp2p_icp_filters/FilterByRange.h>
+#include <mp2p_icp_filters/FilterByRing.h>
 #include <mp2p_icp_filters/FilterCurvature.h>
 #include <mp2p_icp_filters/FilterDecimateAdaptive.h>
 #include <mp2p_icp_filters/FilterDecimateVoxels.h>
@@ -44,10 +46,12 @@ MRPT_INITIALIZER(register_mola_lidar_segmentation)
     registerClass(CLASS_ID(mp2p_icp_filters::GeneratorEdgesFromCurvature));
 
     // Filters:
+    registerClass(CLASS_ID(mp2p_icp_filters::FilterAdjustTimestamps));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBase));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBoundingBox));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterByIntensity));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterByRange));
+    registerClass(CLASS_ID(mp2p_icp_filters::FilterByRing));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterCurvature));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterDecimateAdaptive));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterDecimateVoxels));
