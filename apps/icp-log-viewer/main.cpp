@@ -90,11 +90,12 @@ nanogui::Slider*   slIterationDetails = nullptr;
 const size_t                   MAX_VARIABLE_LIST = 100;
 std::vector<nanogui::TextBox*> lbDynVariables;
 
-nanogui::CheckBox* cbViewOrtho          = nullptr;
-nanogui::CheckBox* cbCameraFollowsLocal = nullptr;
-nanogui::CheckBox* cbViewVoxelsAsPoints = nullptr;
-nanogui::CheckBox* cbColorizeLocalMap   = nullptr;
-nanogui::CheckBox* cbColorizeGlobalMap  = nullptr;
+nanogui::CheckBox* cbViewOrtho           = nullptr;
+nanogui::CheckBox* cbCameraFollowsLocal  = nullptr;
+nanogui::CheckBox* cbViewVoxelsAsPoints  = nullptr;
+nanogui::CheckBox* cbViewVoxelsFreeSpace = nullptr;
+nanogui::CheckBox* cbColorizeLocalMap    = nullptr;
+nanogui::CheckBox* cbColorizeGlobalMap   = nullptr;
 
 nanogui::CheckBox* cbViewPairings = nullptr;
 
@@ -653,6 +654,11 @@ void main_show_gui()
     cbViewVoxelsAsPoints->setChecked(true);
     cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
 
+    cbViewVoxelsFreeSpace =
+        tab5->add<nanogui::CheckBox>("Render free space of voxel maps");
+    cbViewVoxelsFreeSpace->setChecked(false);
+    cbViewVoxelsFreeSpace->setCallback([&](bool) { rebuild_3d_view(); });
+
     cbColorizeLocalMap = tab5->add<nanogui::CheckBox>("Recolorize local map");
     cbColorizeLocalMap->setCallback([&](bool) { rebuild_3d_view(); });
 
@@ -688,6 +694,12 @@ void main_show_gui()
                 case GLFW_KEY_SPACE:
                     isAutoPlayActive = !isAutoPlayActive;
                     btnSelectorAutoplay->setPushed(isAutoPlayActive);
+                    break;
+                case 'i':
+                case 'I':
+                    cbShowInitialPose->setChecked(
+                        !cbShowInitialPose->checked());
+                    cbShowInitialPose->callback()(cbShowInitialPose->checked());
                     break;
             };
 
@@ -1031,9 +1043,10 @@ void rebuild_3d_view(bool regenerateMaps)
         if (!cb->checked()) continue;  // hidden
         rpGlobal.points.visible = true;
 
-        auto& rpL                      = rpGlobal.points.perLayer[lyName];
-        rpL.pointSize                  = slGlobalPointSize->value();
-        rpL.render_voxelmaps_as_points = cbViewVoxelsAsPoints->checked();
+        auto& rpL                       = rpGlobal.points.perLayer[lyName];
+        rpL.pointSize                   = slGlobalPointSize->value();
+        rpL.render_voxelmaps_as_points  = cbViewVoxelsAsPoints->checked();
+        rpL.render_voxelmaps_free_space = cbViewVoxelsFreeSpace->checked();
 
         if (cbColorizeGlobalMap->checked())
         {
@@ -1100,9 +1113,10 @@ void rebuild_3d_view(bool regenerateMaps)
         if (!cb->checked()) continue;  // hidden
         rpLocal.points.visible = true;
 
-        auto& rpL                      = rpLocal.points.perLayer[lyName];
-        rpL.pointSize                  = slLocalPointSize->value();
-        rpL.render_voxelmaps_as_points = cbViewVoxelsAsPoints->checked();
+        auto& rpL                       = rpLocal.points.perLayer[lyName];
+        rpL.pointSize                   = slLocalPointSize->value();
+        rpL.render_voxelmaps_as_points  = cbViewVoxelsAsPoints->checked();
+        rpL.render_voxelmaps_free_space = cbViewVoxelsFreeSpace->checked();
         if (cbColorizeLocalMap->checked())
         {
             auto& cm                  = rpL.colorMode.emplace();
