@@ -151,6 +151,7 @@ function(mola_set_target_build_options TARGETNAME)
     target_compile_options(${TARGETNAME} PRIVATE
       -Wall -Wextra -Wshadow
       -Werror=return-type # error on missing return();
+      -Wabi=11
       -Wtype-limits -Wcast-align -Wparentheses
       -fPIC
     )
@@ -220,7 +221,7 @@ function(mola_configure_library TARGETNAME)
     TARGETS ${TARGETNAME}
     # export to ROOT cmake directory (when building MOLA as a superproject)
     FILE ${CMAKE_BINARY_DIR}/${TARGETNAME}-targets.cmake
-    NAMESPACE mola::
+	NAMESPACE mola::
   )
 
   # Add alias to use the namespaced name within local builds from source:
@@ -246,7 +247,6 @@ function(mola_configure_library TARGETNAME)
 			${TARGETNAME}-targets
 		DESTINATION
 			${CMAKE_INSTALL_LIBDIR}/${TARGETNAME}/cmake
-		NAMESPACE mola::
 	)
 	install(
 		FILES
