@@ -2,12 +2,6 @@
 Changelog for package mola_common
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.3.0 (2024-01-07)
-------------------
-* Fix usage of mola:: cmake prefix
-* add package file attribute
-* Contributors: Jose Luis Blanco-Claraco
-
 0.2.2 (2023-09-08)
 ------------------
 * Fix package name in docs
