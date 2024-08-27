@@ -5,7 +5,7 @@
 -->
 <package format="3">
   <name>mp2p_icp</name>
-  <version>1.5.3</version>
+  <version>1.5.5</version>
   <description>A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++</description>
 
   <maintainer email="joseluisblancoc@gmail.com">Jose-Luis Blanco-Claraco</maintainer>
@@ -15,8 +15,16 @@
 
 
   <!-- Deps required by user code (they are in public headers or built as ROS (vs system) packages -->
-  <depend>mrpt2</depend>
   <depend>mola_common</depend>
+
+  <depend>mrpt_libbase</depend>
+  <depend>mrpt_libobs</depend>
+  <depend>mrpt_libposes</depend>
+  <depend>mrpt_libmaps</depend>
+  <depend>mrpt_libgui</depend>
+  <depend>mrpt_libtclap</depend>
+
+  <depend>tbb</depend>  <!-- Required to exploit paralelization in many ICP algorithms -->
 
   <!-- optional for part of the tests -->
   <!-- depend>mola_test_datasets</depend>  -->
