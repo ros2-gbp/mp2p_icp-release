@@ -2,6 +2,24 @@
 Changelog for package mp2p_icp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.6.0 (2024-09-08)
+------------------
+* Port Point2Plane matcher to use the new NN-for-planes API
+* mp2p_icp_map library: add NearestPlaneCapable virtual API
+* cmake: move from glob expressions to explicit lists of source files
+* clarify eigenvalues order in headers
+* Contributors: Jose Luis Blanco-Claraco
+
+1.5.6 (2024-09-07)
+------------------
+* sm2mm cli: show map contents before writing to disk
+* add another demo sm2mm file for the mola tutorials
+* Add another sm2mm demo file w/o deskew for the mola mapping tutorial
+* Matcher_Point2Plane: fix build error in armhf
+* Fix build with embedded mola_common
+* README: Add ROS badges for all architectures
+* Contributors: Jose Luis Blanco-Claraco
+
 1.5.5 (2024-08-27)
 ------------------
 * Explicitly add tbb as dependency in package.xml
