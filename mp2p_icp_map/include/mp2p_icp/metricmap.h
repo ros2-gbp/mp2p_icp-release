@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include <mp2p_icp/NearestPlaneCapable.h>
 #include <mp2p_icp/layer_name_t.h>
 #include <mp2p_icp/plane_patch.h>
 #include <mp2p_icp/render_params.h>
@@ -254,6 +255,14 @@ mrpt::maps::CPointsMap* MapToPointsMap(mrpt::maps::CMetricMap& map);
  * an exception if it `throwIfNotImplemented` is `true`.
  */
 const mrpt::maps::NearestNeighborsCapable* MapToNN(
+    const mrpt::maps::CMetricMap& map, bool throwIfNotImplemented);
+
+/** Returns the dynamic_cast<> of the metric map as a
+ * mp2p_icp::NearestPlaneCapable.
+ * If the interface is not implemented it returns nullptr, or throws
+ * an exception if it `throwIfNotImplemented` is `true`.
+ */
+const mp2p_icp::NearestPlaneCapable *MapToNP(
     const mrpt::maps::CMetricMap& map, bool throwIfNotImplemented);
 
 /** @} */
