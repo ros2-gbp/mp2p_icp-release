@@ -2,6 +2,18 @@
 Changelog for package mp2p_icp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.6.2 (2024-09-14)
+------------------
+* Expose << and >> operators for geo-reference data structures
+* Fix missing build_dep
+* Contributors: Jose Luis Blanco-Claraco
+
+1.6.1 (2024-09-11)
+------------------
+* Fix missing catkin buildtoo_depend for ROS1 builds
+* Update RTTI macros for upcoming MRPT 2.14.0
+* Contributors: Jose Luis Blanco-Claraco
+
 1.6.0 (2024-09-08)
 ------------------
 * Port Point2Plane matcher to use the new NN-for-planes API
