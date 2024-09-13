@@ -7,17 +7,13 @@
 # Released under GNU GPL v3. See LICENSE file
 # ------------------------------------------------------------------------------
 
-# Minimum CMake version: deprecated if <3.5 (as of Apr 2024)
-cmake_minimum_required(VERSION 3.5)
+# Minimum CMake vesion: limited by CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS
+cmake_minimum_required(VERSION 3.4)
 
 if("$ENV{ROS_VERSION}" STREQUAL "2")
 	set(DETECTED_ROS2 TRUE)
-	set(PACKAGE_ROS_VERSION 2)
-elseif("$ENV{ROS_VERSION}" STREQUAL "1")
-	set(DETECTED_ROS1 TRUE)
-	set(PACKAGE_ROS_VERSION 1)
-	set(CMAKE_CXX_STANDARD 14)
 endif()
+
 
 project(mola_common)
 
@@ -34,13 +30,14 @@ include(mola-version.cmake)
 set(mola_common_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Path to mola_common")
 
 # not ament-based builds (standalone, w/o ROS):
-if ((NOT DETECTED_ROS2) AND (NOT DETECTED_ROS1))
+if (NOT DETECTED_ROS2)
 	# Generate: mola_common-version.cmake
 	include(CMakePackageConfigHelpers)
 
 	if(NOT ${CMAKE_VERSION} VERSION_LESS "3.14.0")
 		set(ARCH_INDEP_FLAG "ARCH_INDEPENDENT")
 	endif()
+
 
 	write_basic_package_version_file(
 		# generate to the topmost root binary dir:
@@ -59,6 +56,7 @@ if ((NOT DETECTED_ROS2) AND (NOT DETECTED_ROS1))
 		# Parse: "@var_names@" only
 		@ONLY
 	)
+
 
 	# Install files:
 	install(
@@ -81,34 +79,14 @@ if ((NOT DETECTED_ROS2) AND (NOT DETECTED_ROS1))
 	endif()
 endif()
 
-
-# -----------------------------------------------------------------------------
-#  common
-# -----------------------------------------------------------------------------
-set(CUSTOM_CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-
 # Install files common to both, ROS and non-ROS builds:
 install(
 	FILES
-		${CUSTOM_CMAKE_DIR}/mola_cmake_functions.cmake
-		${CUSTOM_CMAKE_DIR}/mola-xxx-config.cmake.in
+		${CMAKE_SOURCE_DIR}/mola_cmake_functions.cmake
+		${CMAKE_SOURCE_DIR}/mola-xxx-config.cmake.in
 		DESTINATION
 			share/${PROJECT_NAME}/cmake
 )
-
-
-# -----------------------------------------------------------------------------
-#  ROS1
-# -----------------------------------------------------------------------------
-if (DETECTED_ROS1)
-	# Find the required catkin packages
-	find_package(catkin REQUIRED)
-
-	# Declare this project as a catkin package
-	catkin_package(
-		CFG_EXTRAS mola_cmake_functions.cmake
-	)
-endif()
 
 # -----------------------------------------------------------------------------
 #  ROS2
@@ -124,7 +102,10 @@ if (DETECTED_ROS2)
 	# Add custom mola cmake macros, as in our non-ament (ROS2) config.cmake file:
 	# See: mola_common-config.cmake.in
 
-	ament_package(
-		CONFIG_EXTRAS cmake/mola_cmake_functions.cmake
-	)
+	set(mola_common_CONFIG_EXTRAS mola_cmake_functions.cmake)
+
+	ament_package()
 endif()
+
+
+
