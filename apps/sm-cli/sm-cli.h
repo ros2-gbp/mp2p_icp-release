@@ -83,6 +83,7 @@ int  commandInfo();  // "info"
 int  commandLevel();  // "level"
 int  commandTrim();  // "trim"
 int  commandJoin();  // "join"
+int  commandTf();  // "tf"
 int  commandExportKF();  // "export-keyframes"
 int  commandExportRawlog();  // "export-rawlog"
 
