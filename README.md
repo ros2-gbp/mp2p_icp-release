@@ -1,3 +1,26 @@
+## mp2p_icp (humble) - 1.6.4-1
+
+The packages in the `mp2p_icp` repository were released into the `humble` distro by running `/usr/bin/bloom-release -y -r humble mp2p_icp` on `Wed, 18 Dec 2024 08:34:44 -0000`
+
+The `mp2p_icp` package was released.
+
+Version of package(s) in repository `mp2p_icp`:
+
+- upstream repository: https://github.com/MOLAorg/mp2p_icp.git
+- release repository: https://github.com/ros2-gbp/mp2p_icp-release.git
+- rosdistro version: `1.6.3-1`
+- old version: `1.6.3-1`
+- new version: `1.6.4-1`
+
+Versions of tools used:
+
+- bloom version: `0.12.0`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.25.1`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## mp2p_icp (humble) - 1.6.3-1
 
 The packages in the `mp2p_icp` repository were released into the `humble` distro by running `/home/jlblanco/code/bloom-venv/bin/bloom-release -r humble mp2p_icp` on `Mon, 11 Nov 2024 12:20:01 -0000`
