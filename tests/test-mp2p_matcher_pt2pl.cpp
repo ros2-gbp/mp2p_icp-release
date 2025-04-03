@@ -16,19 +16,19 @@
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/maps/CSimplePointsMap.h>
 
-static mrpt::maps::CSimplePointsMap::Ptr generateGlobalPoints()
+namespace
+{
+ mrpt::maps::CSimplePointsMap::Ptr generateGlobalPoints()
 {
     auto pts = mrpt::maps::CSimplePointsMap::Create();
 
     // Plane:
     for (int ix = 0; ix < 10; ix++)
-        for (int iy = 0; iy < 10; iy++)
-            pts->insertPoint(ix * 0.01f, 5.0f + iy * 0.01f, .0f);
+        for (int iy = 0; iy < 10; iy++) pts->insertPoint(ix * 0.01f, 5.0f + iy * 0.01f, .0f);
 
     // Plane:
     for (int iy = 0; iy < 10; iy++)
-        for (int iz = 0; iz < 10; iz++)
-            pts->insertPoint(10.0f, iy * 0.01f, iz * 0.01f);
+        for (int iz = 0; iz < 10; iz++) pts->insertPoint(10.0f, iy * 0.01f, iz * 0.01f);
 
     // Not a plane:
     for (int ix = 0; ix < 10; ix++)
@@ -39,7 +39,7 @@ static mrpt::maps::CSimplePointsMap::Ptr generateGlobalPoints()
     return pts;
 }
 
-static mrpt::maps::CSimplePointsMap::Ptr generateLocalPoints()
+mrpt::maps::CSimplePointsMap::Ptr generateLocalPoints()
 {
     auto pts = mrpt::maps::CSimplePointsMap::Create();
 
@@ -48,18 +48,17 @@ static mrpt::maps::CSimplePointsMap::Ptr generateLocalPoints()
 
     return pts;
 }
+}
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
     try
     {
         mp2p_icp::metric_map_t pcGlobal;
-        pcGlobal.layers[mp2p_icp::metric_map_t::PT_LAYER_RAW] =
-            generateGlobalPoints();
+        pcGlobal.layers[mp2p_icp::metric_map_t::PT_LAYER_RAW] = generateGlobalPoints();
 
         mp2p_icp::metric_map_t pcLocal;
-        pcLocal.layers[mp2p_icp::metric_map_t::PT_LAYER_RAW] =
-            generateLocalPoints();
+        pcLocal.layers[mp2p_icp::metric_map_t::PT_LAYER_RAW] = generateLocalPoints();
 
         {
             auto m = mp2p_icp::Matcher_Point2Plane::Create();
@@ -94,8 +93,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                 // For pose #2
                 mp2p_icp::Pairings   pairs;
                 mp2p_icp::MatchState ms(pcGlobal, pcLocal);
-                m->match(
-                    pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0}, {}, ms, pairs);
+                m->match(pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0}, {}, ms, pairs);
                 ASSERT_EQUAL_(pairs.size(), 1U);
                 ASSERT_EQUAL_(pairs.paired_pt2pl.size(), 1U);
 
@@ -120,17 +118,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                 // For pose #3
                 mp2p_icp::Pairings   pairs;
                 mp2p_icp::MatchState ms(pcGlobal, pcLocal);
-                m->match(
-                    pcGlobal, pcLocal, {18.053, 0.05, 0.03, 0, 0, 0}, {}, ms,
-                    pairs);
+                m->match(pcGlobal, pcLocal, {18.053, 0.05, 0.03, 0, 0, 0}, {}, ms, pairs);
                 ASSERT_EQUAL_(pairs.paired_pt2pl.size(), 0U);
             }
 
             {
                 // For pose #2 bis, NOT avoiding duplicated matches with another
                 // pt-to-pt matcher:
-                auto mPt2Pt =
-                    mp2p_icp::Matcher_Points_DistanceThreshold::Create();
+                auto mPt2Pt = mp2p_icp::Matcher_Points_DistanceThreshold::Create();
                 mrpt::containers::yaml p2;
                 p2["threshold"]                      = 0.1;
                 p2["thresholdAngularDeg"]            = .0;
@@ -138,8 +133,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                 mPt2Pt->initialize(p2);
 
                 const mp2p_icp::Pairings pairs = mp2p_icp::run_matchers(
-                    {m, mPt2Pt}, pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0},
-                    {});
+                    {m, mPt2Pt}, pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0}, {});
 
                 // std::cout << pairs.contents_summary() << std::endl;
                 ASSERT_EQUAL_(pairs.size(), 2U);
@@ -150,8 +144,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
             {
                 // For pose #2 tris, DO avoid duplicated matches with another
                 // pt-to-pt matcher:
-                auto mPt2Pt =
-                    mp2p_icp::Matcher_Points_DistanceThreshold::Create();
+                auto mPt2Pt = mp2p_icp::Matcher_Points_DistanceThreshold::Create();
                 mrpt::containers::yaml p2;
                 p2["threshold"]                      = 0.1;
                 p2["thresholdAngularDeg"]            = .0;
@@ -159,8 +152,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                 mPt2Pt->initialize(p2);
 
                 const mp2p_icp::Pairings pairs = mp2p_icp::run_matchers(
-                    {m, mPt2Pt}, pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0},
-                    {});
+                    {m, mPt2Pt}, pcGlobal, pcLocal, {8.04, 0, 0.0, 0, 0, 0}, {});
 
                 // std::cout << pairs.contents_summary() << std::endl;
                 ASSERT_EQUAL_(pairs.size(), 1U);
