@@ -2,6 +2,14 @@
 Changelog for package mp2p_icp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.6.7 (2025-04-03)
+------------------
+* mm-georef cli app: support reading/writing georef info in YAML format
+* georeferencing metadata now can be read/writen as YAML files
+* clang-format: switch to column limit=100
+* Update to robin-map v1.4.0
+* Contributors: Jose Luis Blanco-Claraco
+
 1.6.6 (2025-02-26)
 ------------------
 * Docs: add page for mm-georef
