@@ -11,6 +11,7 @@
  */
 
 #include <mp2p_icp/metricmap.h>
+#include <mrpt/containers/yaml.h>
 #include <mrpt/io/CFileGZInputStream.h>
 #include <mrpt/io/CFileGZOutputStream.h>
 #include <mrpt/maps/CVoxelMap.h>
@@ -30,8 +31,7 @@
 #include <algorithm>
 #include <iterator>
 
-IMPLEMENTS_MRPT_OBJECT(
-    metric_map_t, mrpt::serialization::CSerializable, mp2p_icp)
+IMPLEMENTS_MRPT_OBJECT(metric_map_t, mrpt::serialization::CSerializable, mp2p_icp)
 
 using namespace mp2p_icp;
 
@@ -58,8 +58,7 @@ void    metric_map_t::serializeTo(mrpt::serialization::CArchive& out) const
     // Optional user data:
     derivedSerializeTo(out);
 }
-void metric_map_t::serializeFrom(
-    mrpt::serialization::CArchive& in, uint8_t version)
+void metric_map_t::serializeFrom(mrpt::serialization::CArchive& in, uint8_t version)
 {
     switch (version)
     {
@@ -84,8 +83,7 @@ void metric_map_t::serializeFrom(
             {
                 std::string name;
                 in >> name;
-                layers[name] = mrpt::ptr_cast<mrpt::maps::CMetricMap>::from(
-                    in.ReadObject());
+                layers[name] = mrpt::ptr_cast<mrpt::maps::CMetricMap>::from(in.ReadObject());
             }
 
             if (version >= 1) { in >> id >> label; }
@@ -100,8 +98,8 @@ void metric_map_t::serializeFrom(
             if ((version >= 2 && version < 4) && in.ReadAs<bool>())
             {
                 auto& g = georeferencing.emplace();
-                in >> g.geo_coord.lat.decimal_value >>
-                    g.geo_coord.lon.decimal_value >> g.geo_coord.height;
+                in >> g.geo_coord.lat.decimal_value >> g.geo_coord.lon.decimal_value >>
+                    g.geo_coord.height;
                 if (version >= 3) { in >> g.T_enu_to_map; }
                 else { in >> g.T_enu_to_map.mean; }
             }
@@ -142,8 +140,7 @@ void metric_map_t::get_visualization_planes(
 
     for (const auto& plane : planes)
     {
-        auto gl_pl =
-            mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
+        auto gl_pl = mrpt::opengl::CGridPlaneXY::Create(-pw, pw, -pw, pw, .0, pf);
         gl_pl->setColor_u8(p.color);
         mrpt::math::TPose3D planePose;
         plane.plane.getAsPose3DForcingOrigin(plane.centroid, planePose);
@@ -199,10 +196,7 @@ void metric_map_t::get_visualization_points(
     else
     {
         // render all layers with the same params:
-        for (const auto& kv : layers)
-        {
-            get_visualization_map_layer(o, p.allLayers, kv.second);
-        }
+        for (const auto& kv : layers) { get_visualization_map_layer(o, p.allLayers, kv.second); }
     }
 
     MRPT_END
@@ -229,13 +223,11 @@ void metric_map_t::get_visualization_map_layer(
             // Render as real voxelmaps:
             if (voxelMap)
             {
-                voxelMap->renderingOptions.generateFreeVoxels =
-                    p.render_voxelmaps_free_space;
+                voxelMap->renderingOptions.generateFreeVoxels = p.render_voxelmaps_free_space;
             }
             else if (voxelRGBMap)
             {
-                voxelRGBMap->renderingOptions.generateFreeVoxels =
-                    p.render_voxelmaps_free_space;
+                voxelRGBMap->renderingOptions.generateFreeVoxels = p.render_voxelmaps_free_space;
             }
 
             // regular render method:
@@ -245,16 +237,14 @@ void metric_map_t::get_visualization_map_layer(
     }
     else { pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(map); }
 
-    if (!pts ||
-        (p.colorMode.has_value() && p.colorMode->keep_original_cloud_color))
+    if (!pts || (p.colorMode.has_value() && p.colorMode->keep_original_cloud_color))
     {
         // Not convertible to point maps or user selected their original colors,
         // use its own default renderer:
         map->getVisualizationInto(o);
 
         // apply the point size, if possible:
-        if (auto glPtsCol = o.getByClass<mrpt::opengl::CPointCloudColoured>();
-            glPtsCol)
+        if (auto glPtsCol = o.getByClass<mrpt::opengl::CPointCloudColoured>(); glPtsCol)
         {
             glPtsCol->setPointSize(p.pointSize);
         }
@@ -286,17 +276,15 @@ void metric_map_t::get_visualization_map_layer(
 
         ASSERT_(p.colorMode->recolorizeByCoordinate.has_value());
 
-        const unsigned int coordIdx = static_cast<unsigned int>(
-            p.colorMode->recolorizeByCoordinate.value());
+        const unsigned int coordIdx =
+            static_cast<unsigned int>(p.colorMode->recolorizeByCoordinate.value());
         ASSERT_(coordIdx < 3);
 
         float min = bb.min[coordIdx], max = bb.max[coordIdx];
 
-        if (hasToAutoFindBB &&
-            p.colorMode->autoBoundingBoxOutliersPercentile.has_value())
+        if (hasToAutoFindBB && p.colorMode->autoBoundingBoxOutliersPercentile.has_value())
         {
-            const float confidenceInterval =
-                *p.colorMode->autoBoundingBoxOutliersPercentile;
+            const float confidenceInterval = *p.colorMode->autoBoundingBoxOutliersPercentile;
 
             // handle planar maps (avoids error in histogram below):
             for (int i = 0; i < 3; i++)
@@ -310,8 +298,7 @@ void metric_map_t::get_visualization_map_layer(
                 mrpt::math::CHistogram(bb.min.y, bb.max.y, nBins),
                 mrpt::math::CHistogram(bb.min.z, bb.max.z, nBins)};
 
-            const auto lambdaVisitPoints =
-                [&hists](const mrpt::math::TPoint3Df& pt)
+            const auto lambdaVisitPoints = [&hists](const mrpt::math::TPoint3Df& pt)
             {
                 for (int i = 0; i < 3; i++) hists[i].add(pt[i]);
             };
@@ -333,16 +320,13 @@ void metric_map_t::get_visualization_map_layer(
 
         }  // end compute outlier limits
 
-        const float coordMin = p.colorMode->colorMapMinCoord.has_value()
-                                   ? *p.colorMode->colorMapMinCoord
-                                   : min;
+        const float coordMin =
+            p.colorMode->colorMapMinCoord.has_value() ? *p.colorMode->colorMapMinCoord : min;
 
-        const float coordMax = p.colorMode->colorMapMaxCoord.has_value()
-                                   ? *p.colorMode->colorMapMaxCoord
-                                   : max;
+        const float coordMax =
+            p.colorMode->colorMapMaxCoord.has_value() ? *p.colorMode->colorMapMaxCoord : max;
 
-        glPts->recolorizeByCoordinate(
-            coordMin, coordMax, coordIdx, p.colorMode->colorMap);
+        glPts->recolorizeByCoordinate(coordMin, coordMax, coordIdx, p.colorMode->colorMap);
 
         o.insert(glPts);
     }
@@ -359,48 +343,35 @@ void metric_map_t::get_visualization_map_layer(
     }
 }
 
-bool metric_map_t::empty() const
-{
-    return layers.empty() && lines.empty() && planes.empty();
-}
+bool metric_map_t::empty() const { return layers.empty() && lines.empty() && planes.empty(); }
 void metric_map_t::clear() { *this = metric_map_t(); }
 
 // TODO(JLBC): Write unit test for mergeWith()
 
 void metric_map_t::merge_with(
-    const metric_map_t&                       otherPc,
-    const std::optional<mrpt::math::TPose3D>& otherRelativePose)
+    const metric_map_t& otherPc, const std::optional<mrpt::math::TPose3D>& otherRelativePose)
 {
     mrpt::poses::CPose3D pose;
-    if (otherRelativePose.has_value())
-        pose = mrpt::poses::CPose3D(otherRelativePose.value());
+    if (otherRelativePose.has_value()) pose = mrpt::poses::CPose3D(otherRelativePose.value());
 
     // Lines:
     if (otherRelativePose.has_value())
     {
         std::transform(
-            otherPc.lines.begin(), otherPc.lines.end(),
-            std::back_inserter(lines),
+            otherPc.lines.begin(), otherPc.lines.end(), std::back_inserter(lines),
             [&](const mrpt::math::TLine3D& l)
             {
                 return mrpt::math::TLine3D::FromPointAndDirector(
-                    pose.composePoint(l.pBase),
-                    pose.rotateVector(l.getDirectorVector()));
+                    pose.composePoint(l.pBase), pose.rotateVector(l.getDirectorVector()));
             });
     }
-    else
-    {
-        std::copy(
-            otherPc.lines.begin(), otherPc.lines.end(),
-            std::back_inserter(lines));
-    }
+    else { std::copy(otherPc.lines.begin(), otherPc.lines.end(), std::back_inserter(lines)); }
 
     // Planes:
     if (otherRelativePose.has_value())
     {
         std::transform(
-            otherPc.planes.begin(), otherPc.planes.end(),
-            std::back_inserter(planes),
+            otherPc.planes.begin(), otherPc.planes.end(), std::back_inserter(planes),
             [&](const plane_patch_t& l)
             {
                 plane_patch_t g;
@@ -412,12 +383,7 @@ void metric_map_t::merge_with(
                 return g;
             });
     }
-    else
-    {
-        std::copy(
-            otherPc.planes.begin(), otherPc.planes.end(),
-            std::back_inserter(planes));
-    }
+    else { std::copy(otherPc.planes.begin(), otherPc.planes.end(), std::back_inserter(planes)); }
 
     // Points:
     for (const auto& layer : otherPc.layers)
@@ -429,15 +395,12 @@ void metric_map_t::merge_with(
         if (layers.count(name) == 0)
         {
             // Make a copy and transform (if applicable):
-            layers[name] = std::dynamic_pointer_cast<mrpt::maps::CMetricMap>(
-                otherMap->duplicateGetSmartPtr());
+            layers[name] =
+                std::dynamic_pointer_cast<mrpt::maps::CMetricMap>(otherMap->duplicateGetSmartPtr());
 
             if (otherRelativePose.has_value())
             {
-                if (auto pts =
-                        std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(
-                            layers[name]);
-                    pts)
+                if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layers[name]); pts)
                 {
                     // Transform:
                     pts->changeCoordinatesReference(pose);
@@ -453,14 +416,10 @@ void metric_map_t::merge_with(
         else
         {
             // merge with existing layer:
-            if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(
-                    layers[name]);
-                pts)
+            if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layers[name]); pts)
             {
                 pts->insertAnotherMap(
-                    std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(otherMap)
-                        .get(),
-                    pose);
+                    std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(otherMap).get(), pose);
             }
             else
             {
@@ -487,9 +446,7 @@ size_t metric_map_t::size_points_only() const
     size_t n = 0;
     for (const auto& layer : layers)
     {
-        if (auto pts =
-                std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layer.second);
-            pts)
+        if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layer.second); pts)
         {
             n += pts->size();
         }
@@ -509,13 +466,11 @@ std::string metric_map_t::contents_summary() const
     if (georeferencing)
     {
         const auto& gc = georeferencing->geo_coord;
-        ret += "georeferenced: "s + "lat="s + gc.lat.getAsString() + " lon="s +
-               gc.lon.getAsString() +
-               mrpt::format(
-                   " (%.09f  %.09f) ", gc.lat.getDecimalValue(),
-                   gc.lon.getDecimalValue()) +
-               " h="s + std::to_string(gc.height) + " T_enu_map="s +
-               georeferencing->T_enu_to_map.asString();
+        ret +=
+            "georeferenced: "s + "lat="s + gc.lat.getAsString() + " lon="s + gc.lon.getAsString() +
+            mrpt::format(" (%.09f  %.09f) ", gc.lat.getDecimalValue(), gc.lon.getDecimalValue()) +
+            " h="s + std::to_string(gc.height) + " T_enu_map="s +
+            georeferencing->T_enu_to_map.asString();
     }
 
     if (empty()) return {ret + "empty"s};
@@ -534,15 +489,11 @@ std::string metric_map_t::contents_summary() const
     for (const auto& layer : layers)
     {
         ASSERT_(layer.second);
-        if (auto pts =
-                std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layer.second);
-            pts)
+        if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layer.second); pts)
         {
             nPts += pts->size();
         }
-        else if (auto vxs = std::dynamic_pointer_cast<mrpt::maps::CVoxelMap>(
-                     layer.second);
-                 vxs)
+        else if (auto vxs = std::dynamic_pointer_cast<mrpt::maps::CVoxelMap>(layer.second); vxs)
         {
             nVoxels += vxs->grid().activeCellsCount();
         }
@@ -553,15 +504,13 @@ std::string metric_map_t::contents_summary() const
     if (nPts != 0 || nVoxels != 0 || otherLayers)
     {
         retAppend(
-            mrpt::system::unitsFormat(static_cast<double>(nPts), 2, false) +
-            " points, "s +
-            mrpt::system::unitsFormat(static_cast<double>(nVoxels), 2, false) +
-            " voxels in "s + std::to_string(layers.size()) + " layers ("s);
+            mrpt::system::unitsFormat(static_cast<double>(nPts), 2, false) + " points, "s +
+            mrpt::system::unitsFormat(static_cast<double>(nVoxels), 2, false) + " voxels in "s +
+            std::to_string(layers.size()) + " layers ("s);
 
         for (const auto& layer : layers)
         {
-            ret +=
-                "\""s + layer.first + "\":"s + layer.second->asString() + " "s;
+            ret += "\""s + layer.first + "\":"s + layer.second->asString() + " "s;
         }
         ret += ")";
     }
@@ -631,12 +580,10 @@ metric_map_t::ConstPtr metric_map_t::get_shared_from_this_or_clone() const
     return ret;
 }
 
-mrpt::maps::CPointsMap::Ptr metric_map_t::point_layer(
-    const layer_name_t& name) const
+mrpt::maps::CPointsMap::Ptr metric_map_t::point_layer(const layer_name_t& name) const
 {
     auto it = layers.find(name);
-    if (it == layers.end())
-        THROW_EXCEPTION_FMT("Layer '%s' does not exist.", name.c_str());
+    if (it == layers.end()) THROW_EXCEPTION_FMT("Layer '%s' does not exist.", name.c_str());
 
     const auto& ptr = it->second;
     if (!ptr) return {};  // empty shared_ptr.
@@ -644,26 +591,20 @@ mrpt::maps::CPointsMap::Ptr metric_map_t::point_layer(
     auto ret = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(ptr);
     if (!ret)
         THROW_EXCEPTION_FMT(
-            "Layer '%s' is not a point cloud (actual class:'%s').",
-            name.c_str(), ptr->GetRuntimeClass()->className);
+            "Layer '%s' is not a point cloud (actual class:'%s').", name.c_str(),
+            ptr->GetRuntimeClass()->className);
 
     return ret;
 }
 
-const mrpt::maps::CPointsMap* mp2p_icp::MapToPointsMap(
-    const mrpt::maps::CMetricMap& map)
+const mrpt::maps::CPointsMap* mp2p_icp::MapToPointsMap(const mrpt::maps::CMetricMap& map)
 {
-    if (auto ptsMap = dynamic_cast<const mrpt::maps::CPointsMap*>(&map); ptsMap)
-    {
-        return ptsMap;
-    }
-    if (auto voxelMap = dynamic_cast<const mrpt::maps::CVoxelMap*>(&map);
-        voxelMap)
+    if (auto ptsMap = dynamic_cast<const mrpt::maps::CPointsMap*>(&map); ptsMap) { return ptsMap; }
+    if (auto voxelMap = dynamic_cast<const mrpt::maps::CVoxelMap*>(&map); voxelMap)
     {
         return voxelMap->getOccupiedVoxels().get();
     }
-    if (auto voxelRGBMap = dynamic_cast<const mrpt::maps::CVoxelMapRGB*>(&map);
-        voxelRGBMap)
+    if (auto voxelRGBMap = dynamic_cast<const mrpt::maps::CVoxelMapRGB*>(&map); voxelRGBMap)
     {
         return voxelRGBMap->getOccupiedVoxels().get();
     }
@@ -672,16 +613,12 @@ const mrpt::maps::CPointsMap* mp2p_icp::MapToPointsMap(
 
 mrpt::maps::CPointsMap* mp2p_icp::MapToPointsMap(mrpt::maps::CMetricMap& map)
 {
-    if (auto ptsMap = dynamic_cast<mrpt::maps::CPointsMap*>(&map); ptsMap)
-    {
-        return ptsMap;
-    }
+    if (auto ptsMap = dynamic_cast<mrpt::maps::CPointsMap*>(&map); ptsMap) { return ptsMap; }
     if (auto voxelMap = dynamic_cast<mrpt::maps::CVoxelMap*>(&map); voxelMap)
     {
         return voxelMap->getOccupiedVoxels().get();
     }
-    if (auto voxelRGBMap = dynamic_cast<mrpt::maps::CVoxelMapRGB*>(&map);
-        voxelRGBMap)
+    if (auto voxelRGBMap = dynamic_cast<mrpt::maps::CVoxelMapRGB*>(&map); voxelRGBMap)
     {
         return voxelRGBMap->getOccupiedVoxels().get();
     }
@@ -691,8 +628,7 @@ mrpt::maps::CPointsMap* mp2p_icp::MapToPointsMap(mrpt::maps::CMetricMap& map)
 const mrpt::maps::NearestNeighborsCapable* mp2p_icp::MapToNN(
     const mrpt::maps::CMetricMap& map, bool throwIfNotImplemented)
 {
-    const auto* ptr =
-        dynamic_cast<const mrpt::maps::NearestNeighborsCapable*>(&map);
+    const auto* ptr = dynamic_cast<const mrpt::maps::NearestNeighborsCapable*>(&map);
 
     if (ptr) return ptr;
     if (!throwIfNotImplemented) return nullptr;
@@ -721,8 +657,7 @@ const mp2p_icp::NearestPlaneCapable* mp2p_icp::MapToNP(
 constexpr const char* GEOREF_MAGIC_STR = "mp2p_icp::Georeferencing";
 
 mrpt::serialization::CArchive& mp2p_icp::operator>>(
-    mrpt::serialization::CArchive&               in,
-    std::optional<metric_map_t::Georeferencing>& g)
+    mrpt::serialization::CArchive& in, std::optional<metric_map_t::Georeferencing>& g)
 {
     std::string georef_stream_signature;
     in >> georef_stream_signature;
@@ -734,8 +669,8 @@ mrpt::serialization::CArchive& mp2p_icp::operator>>(
             if (in.ReadAs<bool>())
             {
                 auto& gg = g.emplace();
-                in >> gg.geo_coord.lat.decimal_value >>
-                    gg.geo_coord.lon.decimal_value >> gg.geo_coord.height;
+                in >> gg.geo_coord.lat.decimal_value >> gg.geo_coord.lon.decimal_value >>
+                    gg.geo_coord.height;
                 in >> gg.T_enu_to_map;
             }
             break;
@@ -747,8 +682,7 @@ mrpt::serialization::CArchive& mp2p_icp::operator>>(
 }
 
 mrpt::serialization::CArchive& mp2p_icp::operator<<(
-    mrpt::serialization::CArchive&                     out,
-    const std::optional<metric_map_t::Georeferencing>& g)
+    mrpt::serialization::CArchive& out, const std::optional<metric_map_t::Georeferencing>& g)
 {
     out << std::string(GEOREF_MAGIC_STR);
     constexpr uint8_t serial_version = 0;
@@ -762,4 +696,66 @@ mrpt::serialization::CArchive& mp2p_icp::operator<<(
         out << g->T_enu_to_map;
     }
     return out;
+}
+
+std::optional<metric_map_t::Georeferencing> mp2p_icp::FromYAML(
+    const mrpt::containers::yaml& yaml_data)
+{
+    ASSERT_(yaml_data.isMap());
+    ASSERT_(yaml_data.has("type"));
+    ASSERT_(yaml_data.has("defined"));
+
+    ASSERT_EQUAL_(yaml_data["type"].as<std::string>(), GEOREF_MAGIC_STR);
+    const bool defined = yaml_data["defined"].as<bool>();
+    if (!defined)
+    {  // empty:
+        return {};
+    }
+
+    std::optional<metric_map_t::Georeferencing> georef;
+
+    auto& g                       = georef.emplace();
+    g.geo_coord.lon.decimal_value = yaml_data["geo_coord"]["lon"].as<double>();
+    g.geo_coord.lat.decimal_value = yaml_data["geo_coord"]["lat"].as<double>();
+    g.geo_coord.height            = yaml_data["geo_coord"]["altitude"].as<double>();
+
+    const auto& ym = yaml_data["T_enu_to_map"]["mean"];
+    g.T_enu_to_map.mean.x(ym["x"].as<double>());
+    g.T_enu_to_map.mean.y(ym["y"].as<double>());
+    g.T_enu_to_map.mean.z(ym["z"].as<double>());
+
+    yaml_data["T_enu_to_map"]["cov"].toMatrix(g.T_enu_to_map.cov);
+
+    return georef;
+}
+
+mrpt::containers::yaml mp2p_icp::ToYAML(const std::optional<metric_map_t::Georeferencing>& gref)
+{
+    mrpt::containers::yaml data = mrpt::containers::yaml::Map();
+
+    data["type"]    = GEOREF_MAGIC_STR;
+    data["defined"] = gref.has_value();
+    if (gref)
+    {
+        {
+            mrpt::containers::yaml gcoord = mrpt::containers::yaml::Map();
+            gcoord["lon"]                 = gref->geo_coord.lon;
+            gcoord["lat"]                 = gref->geo_coord.lat;
+            gcoord["altitude"]            = gref->geo_coord.height;
+
+            data["geo_coord"] = gcoord;
+        }
+
+        mrpt::containers::yaml pose_mean = mrpt::containers::yaml::Map();
+
+        pose_mean["x"] = gref->T_enu_to_map.mean.x();
+        pose_mean["y"] = gref->T_enu_to_map.mean.y();
+        pose_mean["z"] = gref->T_enu_to_map.mean.z();
+
+        mrpt::containers::yaml pose = mrpt::containers::yaml::Map();
+        pose["mean"]                = pose_mean;
+        pose["cov"]                 = mrpt::containers::yaml::FromMatrix(gref->T_enu_to_map.cov);
+        data["T_enu_to_map"]        = pose;
+    }
+    return data;
 }
