@@ -41,7 +41,7 @@ struct Cli
         "YAML file with the mp2p_icp_filters pipeline to load. It must "
         "contain a `filters:` section."
         "See the app README for examples:\n"
-        "https://github.com/MOLAorg/mp2p_icp/tree/master/apps/rawlog-filter",
+        "https://github.com/MOLAorg/mp2p_icp/tree/develop/apps/rawlog-filter",
         true,
         "pipeline.yaml",
         "pipeline.yaml",
@@ -121,7 +121,10 @@ void run_mm_filter(Cli& cli)
     {
         filters = mp2p_icp_filters::filter_pipeline_from_yaml(yamlData["filters"], logLevel);
     }
-    else { std::cout << "[sm2mm] Warning: no filters defined in the pipeline." << std::endl; }
+    else
+    {
+        std::cout << "[sm2mm] Warning: no filters defined in the pipeline." << std::endl;
+    }
 
     // Parameters for twist, and possibly other user-provided variables.
     mp2p_icp::ParameterSource ps;
