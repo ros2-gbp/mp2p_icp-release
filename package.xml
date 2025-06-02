@@ -5,11 +5,11 @@
 -->
 <package format="3">
   <name>mp2p_icp</name>
-  <version>1.6.7</version>
+  <version>1.7.0</version>
   <description>A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++</description>
 
   <maintainer email="joseluisblancoc@gmail.com">Jose-Luis Blanco-Claraco</maintainer>
-  <license file="COPYING">BSD</license>
+  <license file="COPYING">BSD-3-Clause</license>
 
   <url type="website">https://github.com/MOLAorg/mp2p_icp</url>
 
@@ -18,7 +18,7 @@
 
   <buildtool_depend>cmake</buildtool_depend>
   <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
-  <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
+  <!--<buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>-->
 
   <!-- Deps required by user code (they are in public headers or built as ROS (vs system) packages -->
   <depend>mola_common</depend>
