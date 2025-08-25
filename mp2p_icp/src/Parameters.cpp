@@ -1,14 +1,21 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 
 #include <mp2p_icp/Parameters.h>
 #include <mrpt/core/get_env.h>
 #include <mrpt/serialization/CArchive.h>
 #include <mrpt/serialization/stl_serialization.h>
-#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(Parameters, mrpt::serialization::CSerializable, mp2p_icp)
 
@@ -69,20 +76,10 @@ void Parameters::load_from(const mrpt::containers::yaml& p)
     {
         ASSERT_(
             p["quality_checkpoints"].isSequence() &&
-#if MRPT_VERSION >= 0x020d00
-            !p["quality_checkpoints"].asSequenceRange().empty()
-#else
-            !p["quality_checkpoints"].asSequence().empty()
-#endif
-        );
+            !p["quality_checkpoints"].asSequenceRange().empty());
 
         quality_checkpoints.clear();
-#if MRPT_VERSION >= 0x020d00
         for (const auto& e : p["quality_checkpoints"].asSequenceRange())
-#else
-        for (const auto& e : p["quality_checkpoints"].asSequence())
-#endif
-
         {
             ASSERTMSG_(
                 e.isMap(),
