@@ -1,11 +1,20 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 
 #pragma once
 
+#include <mp2p_icp/LocalVelocityBuffer.h>
 #include <mrpt/expr/CRuntimeCompiledExpression.h>
 
 #include <cstdint>
@@ -53,15 +62,22 @@ class ParameterSource
     /** Like updateVariable(), accepting several pairs of names-values */
     void updateVariables(const std::vector<std::pair<std::string, double>>& nameValuePairs)
     {
-        for (const auto& [name, value] : nameValuePairs) updateVariable(name, value);
+        for (const auto& [name, value] : nameValuePairs)
+        {
+            updateVariable(name, value);
+        }
     }
 
+    /** Must be called after updating all variables so changes take effect. */
     void realize();
 
     std::string printVariableValues() const;
 
     /** Returns a copy of the current variable values */
     auto getVariableValues() const -> std::map<std::string, double> { return variables_; }
+
+    /** Local velocity buffer for this parameter source */
+    mutable LocalVelocityBuffer localVelocityBuffer;
 
    private:
     // Attached clients.
@@ -84,9 +100,11 @@ class Parameterizable
      */
     virtual void attachToParameterSource(ParameterSource& source) { source.attach(*this); }
 
+    /** Returns the list of declared parameters */
     auto&       declaredParameters() { return declParameters_; }
     const auto& declaredParameters() const { return declParameters_; }
 
+    /** Returns the attached parameter source */
     ParameterSource*       attachedSource() { return attachedSource_; }
     const ParameterSource* attachedSource() const { return attachedSource_; }
 
@@ -132,7 +150,10 @@ inline void AttachToParameterSource(
     for (auto& objPtr : setObjects)
     {
         auto o = std::dynamic_pointer_cast<Parameterizable>(objPtr);
-        if (!o) continue;
+        if (!o)
+        {
+            continue;
+        }
         o->attachToParameterSource(source);
     }
 }
@@ -147,17 +168,18 @@ inline void AttachToParameterSource(Parameterizable& o, ParameterSource& source)
 
 #define DECLARE_PARAMETER_IN_OPT(__yaml, __variable, __object)    \
     __object.mp2p_icp::Parameterizable::parseAndDeclareParameter( \
-        __yaml.getOrDefault(#__variable, std::to_string(__variable)), __variable);
+        (__yaml).getOrDefault(#__variable, std::to_string(__variable)), __variable);
 
 #define DECLARE_PARAMETER_OPT(__yaml, __variable) \
     DECLARE_PARAMETER_IN_OPT(__yaml, __variable, (*this))
 
-#define DECLARE_PARAMETER_IN_REQ(__yaml, __variable, __object)                           \
-    if (!__yaml.has(#__variable))                                                        \
-        throw std::invalid_argument(mrpt::format(                                        \
-            "Required parameter `%s` not an existing key in dictionary.", #__variable)); \
-    __object.mp2p_icp::Parameterizable::parseAndDeclareParameter(                        \
-        __yaml[#__variable].as<std::string>(), __variable);
+#define DECLARE_PARAMETER_IN_REQ(__yaml, __variable, __object)                               \
+    if (!(__yaml).has(#__variable))                                                          \
+        throw std::invalid_argument(                                                         \
+            mrpt::format(                                                                    \
+                "Required parameter `%s` not an existing key in dictionary.", #__variable)); \
+    (__object).mp2p_icp::Parameterizable::parseAndDeclareParameter(                          \
+        (__yaml)[#__variable].as<std::string>(), __variable);
 
 #define DECLARE_PARAMETER_REQ(__yaml, __variable) \
     DECLARE_PARAMETER_IN_REQ(__yaml, __variable, (*this))
