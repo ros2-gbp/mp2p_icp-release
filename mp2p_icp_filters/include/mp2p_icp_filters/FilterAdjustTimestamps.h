@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   FilterAdjustTimestamps.h
  * @brief  Normalizes point cloud timestamps
@@ -25,11 +33,11 @@ namespace mp2p_icp_filters
  */
 enum class TimestampAdjustMethod : uint8_t
 {
-    /** Adjust such as the earliest timestamp is 0, wih succesive ones
-       representing real ellapsed seconds. */
+    /** Adjust such as the earliest timestamp is 0, wih successive ones
+       representing real elapsed seconds. */
     EarliestIsZero = 0,
     /** Adjust such as the middle timestamp is 0, with the rest being positive
-       and negative ellapsed seconds.  */
+       and negative elapsed seconds.  */
     MiddleIsZero,
     /** Normalize all timestamps such as they are in the range [0,1] */
     Normalize,
