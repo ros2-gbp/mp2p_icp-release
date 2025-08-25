@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   FilterDecimateAdaptive.cpp
  * @brief  An adaptive sampler of pointclouds
@@ -85,7 +93,7 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
     const float voxel_size = largest_dim / _.maximum_voxel_count_per_dimension;
 
     // Parse input cloud thru voxelization:
-    filter_grid_.setResolution(voxel_size);
+    filter_grid_.setConfiguration(voxel_size, true);
     filter_grid_.processPointCloud(pc);
 
     struct DataPerVoxel
