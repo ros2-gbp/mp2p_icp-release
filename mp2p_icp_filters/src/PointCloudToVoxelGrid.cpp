@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   PointCloudToVoxelGrid.cpp
  * @brief  Makes an index of a point cloud using a voxel grid.
@@ -15,21 +23,26 @@
 // Used in the PIMP:
 #include <tsl/robin_map.h>
 
+#include <map>
+
 using namespace mp2p_icp_filters;
 
 struct PointCloudToVoxelGrid::Impl
 {
     tsl::robin_map<indices_t, voxel_t, IndicesHash> pts_voxels;
+    std::map<indices_t, voxel_t, IndicesHash>       pts_voxels_std_map;
 };
 
 PointCloudToVoxelGrid::PointCloudToVoxelGrid() : impl_(mrpt::make_impl<Impl>()) {}
 
-void PointCloudToVoxelGrid::setResolution(const float voxel_size)
+void PointCloudToVoxelGrid::setConfiguration(const float voxel_size, bool use_tsl_robin_map)
 {
     MRPT_START
 
-    impl_->pts_voxels.clear();
-    resolution_ = voxel_size;
+    resolution_        = voxel_size;
+    use_tsl_robin_map_ = use_tsl_robin_map;
+
+    this->clear();
 
     MRPT_END
 }
@@ -39,10 +52,10 @@ void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
     using mrpt::max3;
     using std::abs;
 
-    const auto& xs   = p.getPointsBufferRef_x();
-    const auto& ys   = p.getPointsBufferRef_y();
-    const auto& zs   = p.getPointsBufferRef_z();
-    const auto  npts = xs.size();
+    const auto& xs          = p.getPointsBufferRef_x();
+    const auto& ys          = p.getPointsBufferRef_y();
+    const auto& zs          = p.getPointsBufferRef_z();
+    const auto  point_count = xs.size();
 
     // Previous point:
     float x0, y0, z0;
@@ -50,15 +63,17 @@ void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
 
     auto& pts_voxels = impl_->pts_voxels;
 
-    pts_voxels.reserve(pts_voxels.size() + npts);
+    pts_voxels.reserve(pts_voxels.size() + point_count);
 
-    for (std::size_t i = 0; i < npts; i++)
+    for (std::size_t i = 0; i < point_count; i++)
     {
         // Skip this point?
         if (params_.min_consecutive_distance != .0f &&
             max3(abs(x0 - xs[i]), abs(y0 - ys[i]), abs(z0 - zs[i])) <
                 params_.min_consecutive_distance)
+        {
             continue;
+        }
 
         // Save for the next point:
         x0 = xs[i];
@@ -74,14 +89,36 @@ void PointCloudToVoxelGrid::processPointCloud(const mrpt::maps::CPointsMap& p)
 
 void PointCloudToVoxelGrid::clear()
 {
-    //
-    impl_->pts_voxels.clear();
+    if (use_tsl_robin_map_)
+    {
+        impl_->pts_voxels.clear();
+    }
+    else
+    {
+        impl_->pts_voxels_std_map.clear();
+    }
 }
 
 void PointCloudToVoxelGrid::visit_voxels(
     const std::function<void(const indices_t idx, const voxel_t& vxl)>& userCode) const
 {
-    for (const auto& [idx, vxl] : impl_->pts_voxels) userCode(idx, vxl);
+    if (use_tsl_robin_map_)
+    {
+        for (const auto& [idx, vxl] : impl_->pts_voxels)
+        {
+            userCode(idx, vxl);
+        }
+    }
+    else
+    {
+        for (const auto& [idx, vxl] : impl_->pts_voxels_std_map)
+        {
+            userCode(idx, vxl);
+        }
+    }
 }
 
-size_t PointCloudToVoxelGrid::size() const { return impl_->pts_voxels.size(); }
+size_t PointCloudToVoxelGrid::size() const
+{
+    return use_tsl_robin_map_ ? impl_->pts_voxels.size() : impl_->pts_voxels_std_map.size();
+}
