@@ -4,7 +4,7 @@
 #
 # Copyright (C) 2018-2020, Jose Luis Blanco-Claraco, contributors (AUTHORS.md)
 # All rights reserved.
-# Released under GNU GPL v3. See LICENSE file
+# Released under BSD-3. See LICENSE file
 # ------------------------------------------------------------------------------
 
 # Part of the mola-common repository.
