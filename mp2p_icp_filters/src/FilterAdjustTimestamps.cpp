@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   FilterAdjustTimestamps.cpp
  * @brief  Normalizes point cloud timestamps
@@ -59,6 +67,14 @@ void FilterAdjustTimestamps::filter(mp2p_icp::metric_map_t& inOut) const
 
     auto& pc = *pcPtr;
 
+    if (pc.empty())
+    {
+        MRPT_LOG_WARN_STREAM(
+            "Skipping time adjusting in input cloud '" << params_.pointcloud_layer
+                                                       << "' because it is empty.");
+        return;
+    }
+
     auto* TsPtr = pc.getPointsBufferRef_timestamp();
 
     if (TsPtr == nullptr || (TsPtr->empty() && !pc.empty()))
@@ -72,13 +88,11 @@ void FilterAdjustTimestamps::filter(mp2p_icp::metric_map_t& inOut) const
                                                            << " due to missing timestamps.");
             return;
         }
-        else
-        {
-            THROW_EXCEPTION_FMT(
-                "Cannot do time adjusting for input cloud '%s' "
-                "with contents: %s due to missing timestamps.",
-                params_.pointcloud_layer.c_str(), pc.asString().c_str());
-        }
+
+        THROW_EXCEPTION_FMT(
+            "Cannot do time adjusting for input cloud '%s' "
+            "with contents: %s due to missing timestamps.",
+            params_.pointcloud_layer.c_str(), pc.asString().c_str());
     }
 
     auto& Ts = *TsPtr;
@@ -89,35 +103,59 @@ void FilterAdjustTimestamps::filter(mp2p_icp::metric_map_t& inOut) const
     {
         const float t = Ts[i];
 
-        if (!minT || t < *minT) minT = t;
-        if (!maxT || t > *maxT) maxT = t;
+        if (!minT || t < *minT)
+        {
+            minT = t;
+        }
+        if (!maxT || t > *maxT)
+        {
+            maxT = t;
+        }
     }
     ASSERT_(minT && maxT);
+
+    auto  ps = this->attachedSource();
+    float dt = 0;
 
     switch (params_.method)
     {
         case TimestampAdjustMethod::MiddleIsZero:
         {
-            const float dt = 0.5f * (*maxT + *minT) + params_.time_offset;
-            for (auto& t : Ts) t -= dt;
+            dt = 0.5f * (*maxT + *minT) + static_cast<float>(params_.time_offset);
+            for (auto& t : Ts)
+            {
+                t -= dt;
+            }
         }
         break;
         case TimestampAdjustMethod::EarliestIsZero:
         {
-            const float dt = *minT + params_.time_offset;
-            for (auto& t : Ts) t -= dt;
+            dt = *minT + static_cast<float>(params_.time_offset);
+            for (auto& t : Ts)
+            {
+                t -= dt;
+            }
         }
         break;
         case TimestampAdjustMethod::Normalize:
         {
             const float m = *minT;
             const float k = *maxT != *minT ? 1.0f / (*maxT - *minT) : 1.0f;
-            for (auto& t : Ts) t = (t - m) * k + params_.time_offset;
+            for (auto& t : Ts)
+            {
+                t = (t - m) * k + static_cast<float>(params_.time_offset);
+            }
         }
         break;
 
         default:
             THROW_EXCEPTION("Unknown value for 'method'");
+    }
+
+    if (ps)
+    {
+        ps->localVelocityBuffer.set_reference_zero_time(
+            ps->localVelocityBuffer.get_reference_zero_time() + dt);
     }
 
     MRPT_END
