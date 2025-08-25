@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   PointCloudToVoxelGridSingle.h
  * @brief  Makes an index of a point cloud using a voxel grid.
@@ -29,10 +37,9 @@ class PointCloudToVoxelGridSingle
 {
    public:
     PointCloudToVoxelGridSingle();
-    ~PointCloudToVoxelGridSingle() {}
 
-    /** Changes the voxel resolution, clearing past contents */
-    void setResolution(const float voxel_size);
+    /** Changes the voxel settings, clearing past contents */
+    void setConfiguration(const float voxel_size, bool use_tsl_robin_map = true);
 
     void processPointCloud(const mrpt::maps::CPointsMap& p);
 
@@ -88,8 +95,14 @@ class PointCloudToVoxelGridSingle
         // k1 < k2?
         bool operator()(const indices_t& k1, const indices_t& k2) const noexcept
         {
-            if (k1.cx_ != k2.cx_) return k1.cx_ < k2.cx_;
-            if (k1.cy_ != k2.cy_) return k1.cy_ < k2.cy_;
+            if (k1.cx_ != k2.cx_)
+            {
+                return k1.cx_ < k2.cx_;
+            }
+            if (k1.cy_ != k2.cy_)
+            {
+                return k1.cy_ < k2.cy_;
+            }
             return k1.cz_ < k2.cz_;
         }
     };
@@ -105,6 +118,8 @@ class PointCloudToVoxelGridSingle
    private:
     /** Voxel size (meters) or resolution. */
     float resolution_ = 0.20f;
+
+    bool use_tsl_robin_map_ = true;
 
     /** The actual hash map. Hidden inside a PIMP to prevent problems with
      * duplicated TSL library copies in the user space */
