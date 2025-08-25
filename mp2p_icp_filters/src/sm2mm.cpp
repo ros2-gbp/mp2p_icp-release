@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   sm2mm.cpp
  * @brief  simplemap-to-metricmap utility function
@@ -15,8 +23,8 @@
 #include <mp2p_icp_filters/Generator.h>
 #include <mp2p_icp_filters/sm2mm.h>
 #include <mrpt/core/Clock.h>
+#include <mrpt/obs/CObservationComment.h>
 #include <mrpt/system/progress.h>
-#include <mrpt/version.h>
 
 #include <iostream>
 
@@ -84,20 +92,72 @@ void mp2p_icp_filters::simplemap_to_metricmap(
     ps.updateVariables(options.customVariables);
     ps.realize();
 
+    const auto lambdaProcessLocalVelocityBuffer = [&](const mrpt::obs::CObservation::Ptr& obs)
+    {
+        auto obsComment = std::dynamic_pointer_cast<mrpt::obs::CObservationComment>(obs);
+        if (!obsComment)
+        {
+            return;
+        }
+
+        const auto commentYaml = [&]()
+        {
+            try
+            {
+                return mrpt::containers::yaml::FromText(obsComment->text);
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "Error parsing YAML in comment: " << e.what() << std::endl;
+                return mrpt::containers::yaml();
+            }
+        }();
+
+        if (!commentYaml.isMap() || !commentYaml.has("local_velocity_buffer"))
+        {
+            return;
+        }
+
+        const auto lvb = commentYaml["local_velocity_buffer"];
+        if (!lvb.isMap())
+        {
+            std::cerr << "Error: 'local_velocity_buffer' field is not a map!" << std::endl;
+            return;
+        }
+
+        try
+        {
+            ps.localVelocityBuffer.fromYAML(lvb);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "Error parsing 'local_velocity_buffer': " << e.what() << std::endl;
+            return;
+        }
+    };
+
     // progress bar:
-    if (options.showProgressBar) std::cout << "\n";  // Needed for the VT100 codes below.
+    if (options.showProgressBar)
+    {
+        std::cout << "\n";  // Needed for the VT100 codes below.
+    }
 
     const double tStart = mrpt::Clock::nowDouble();
 
     size_t nKFs = sm.size();
-    if (options.end_index.has_value()) mrpt::keep_min(nKFs, *options.end_index + 1);
+    if (options.end_index.has_value())
+    {
+        mrpt::keep_min(nKFs, *options.end_index + 1);
+    }
 
     size_t curKF = 0;
-    if (options.start_index.has_value()) mrpt::keep_max(curKF, *options.start_index);
+    if (options.start_index.has_value())
+    {
+        mrpt::keep_max(curKF, *options.start_index);
+    }
 
     for (; curKF < nKFs; curKF++)
     {
-#if MRPT_VERSION >= 0x020b05
         const auto& [pose, sf, twist] = sm.get(curKF);
         if (twist.has_value())
         {
@@ -109,9 +169,6 @@ void mp2p_icp_filters::simplemap_to_metricmap(
                  {"wy", twist->wy},
                  {"wz", twist->wz}});
         }
-#else
-        const auto& [pose, sf] = sm.get(curKF);
-#endif
         ASSERT_(pose);
         ASSERT_(sf);
         const mrpt::poses::CPose3D robotPose = pose->getMeanVal();
@@ -129,11 +186,17 @@ void mp2p_icp_filters::simplemap_to_metricmap(
         for (const auto& obs : *sf)
         {
             ASSERT_(obs);
+
+            lambdaProcessLocalVelocityBuffer(obs);
+
             obs->load();
 
             bool handled = mp2p_icp_filters::apply_generators(generators, *obs, mm, robotPose);
 
-            if (!handled) continue;
+            if (!handled)
+            {
+                continue;
+            }
 
             // process it:
             mp2p_icp_filters::apply_filter_pipeline(filters, mm);

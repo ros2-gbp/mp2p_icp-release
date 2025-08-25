@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 
 /**
  * @file   txt2mm/main.cpp
@@ -21,7 +29,7 @@
 #include <mrpt/obs/CObservationPointCloud.h>
 #include <mrpt/system/filesystem.h>
 
-const char* VALID_FORMATS = "(xyz|xyzi|xyzirt|xyzrgb)";
+const char* VALID_FORMATS = "(xyz|xyzi|xyzirt|xyzrgb|xyzrgb_normalized)";
 
 using namespace std::string_literals;
 
@@ -175,24 +183,38 @@ int main(int argc, char** argv)
 
             pc = pts;
         }
-        else if (format == "xyzrgb")
+        else if (format == "xyzrgb" || format == "xyzrgb_normalized")
         {
             ASSERT_GE_(nCols, 6U);
-            auto pts = mrpt::maps::CColouredPointsMap::Create();
+            const bool rgb_normalized = (format == "xyzrgb_normalized");
+            auto       pts            = mrpt::maps::CColouredPointsMap::Create();
             pts->reserve(nRows);
             if (nCols > 6)
+            {
                 std::cout << "Warning: Only the first 6 columns from the file "
                              "will be used for the output format 'xyzrgb'"
                           << std::endl;
+            }
 
             const size_t idxRed = 3, idxGreen = 4, idxBlue = 5;
 
             for (size_t i = 0; i < nRows; i++)
             {
                 pts->insertPointFast(data(i, idxX + 0), data(i, idxX + 1), data(i, idxX + 2));
-                pts->insertPointField_color_R(mrpt::u8tof(data(i, idxRed)));
-                pts->insertPointField_color_G(mrpt::u8tof(data(i, idxGreen)));
-                pts->insertPointField_color_B(mrpt::u8tof(data(i, idxBlue)));
+                if (rgb_normalized)
+                {
+                    // RGBD is already in [0,1] range:
+                    pts->insertPointField_color_R(data(i, idxRed));
+                    pts->insertPointField_color_G(data(i, idxGreen));
+                    pts->insertPointField_color_B(data(i, idxBlue));
+                }
+                else
+                {
+                    // Convert RGB values from [0,255] to [0,1] range:
+                    pts->insertPointField_color_R(mrpt::u8tof(data(i, idxRed)));
+                    pts->insertPointField_color_G(mrpt::u8tof(data(i, idxGreen)));
+                    pts->insertPointField_color_B(mrpt::u8tof(data(i, idxBlue)));
+                }
             }
 
             pc = pts;
