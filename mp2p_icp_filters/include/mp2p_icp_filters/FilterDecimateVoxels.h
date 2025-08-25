@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   FilterDecimateVoxels.h
  * @brief  Builds a new layer with a decimated version of an input layer.
@@ -92,7 +100,11 @@ class FilterDecimateVoxels : public mp2p_icp_filters::FilterBase
         std::string output_pointcloud_layer;
 
         /** Size of each voxel edge [meters] */
-        double voxel_filter_resolution = 1.0;  // [m]
+        float voxel_filter_resolution = 1.0f;  // [m]
+
+        /** Whether to use as container implementation
+         * tsl::robin_map (true, default), or a std::map (false) */
+        bool use_tsl_robin_map = true;
 
         /** If !=0 and there are less input points that this number,
          *  all points will be just moved through without decimation.
