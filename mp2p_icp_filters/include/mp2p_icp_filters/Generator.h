@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- * A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   Generator.h
  * @brief  Base virtual class for point cloud filters
@@ -169,6 +177,9 @@ class Generator : public mrpt::rtti::CObject,  // RTTI support
     virtual bool filterRotatingScan(
         const mrpt::obs::CObservationRotatingScan& pc, mp2p_icp::metric_map_t& out,
         const std::optional<mrpt::poses::CPose3D>& robotPose) const;
+
+    /** Process IMU readings: forward them to the local velocity buffer of the parameter source */
+    virtual bool processIMU(const mrpt::obs::CObservationIMU& imu) const;
 
     bool       initialized_ = false;
     std::regex process_class_names_regex_;

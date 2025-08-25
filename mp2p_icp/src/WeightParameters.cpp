@@ -1,8 +1,16 @@
-/* -------------------------------------------------------------------------
- *  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
- * Copyright (C) 2018-2024 Jose Luis Blanco, University of Almeria
- * See LICENSE for license information.
- * ------------------------------------------------------------------------- */
+/*               _
+ _ __ ___   ___ | | __ _
+| '_ ` _ \ / _ \| |/ _` | Modular Optimization framework for
+| | | | | | (_) | | (_| | Localization and mApping (MOLA)
+|_| |_| |_|\___/|_|\__,_| https://github.com/MOLAorg/mola
+
+ A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
+ and map building tools. mp2p_icp is part of MOLA.
+
+ Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+                         and individual contributors.
+ SPDX-License-Identifier: BSD-3-Clause
+*/
 /**
  * @file   WeightParameters.cpp
  * @brief  Common types for all SE(3) optimal transformation methods.
@@ -13,7 +21,6 @@
 #include <mp2p_icp/WeightParameters.h>
 #include <mrpt/serialization/CArchive.h>
 #include <mrpt/serialization/optional_serialization.h>
-#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(WeightParameters, mrpt::serialization::CSerializable, mp2p_icp)
 
@@ -74,13 +81,7 @@ void WeightParameters::save_to(mrpt::containers::yaml& p) const
 {
     MCP_SAVE(p, use_scale_outlier_detector);
     MCP_SAVE(p, scale_outlier_threshold);
-
-#if MRPT_VERSION >= 0x020b03
     MCP_SAVE(p, robust_kernel);
-#else
-    MCP_SAVE(p, mrpt::typemeta::enum2str(robust_kernel));
-#endif
-
     MCP_SAVE(p, robust_kernel_param);
 
     mrpt::containers::yaml a = mrpt::containers::yaml::Map();
