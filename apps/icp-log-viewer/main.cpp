@@ -14,7 +14,7 @@
 
 /**
  * @file   icp-log-viewer/main.cpp
- * @brief  GUI tool to analize ICP log records (*.icplog files)
+ * @brief  GUI tool to analyze ICP log records (*.icplog files)
  * @author Jose Luis Blanco Claraco
  * @date   Sep 15, 2021
  */
@@ -103,19 +103,21 @@ nanogui::CheckBox* cbColorizeGlobalMap   = nullptr;
 
 nanogui::CheckBox* cbViewPairings = nullptr;
 
-nanogui::CheckBox* cbViewPairings_pt2pt = nullptr;
-nanogui::CheckBox* cbViewPairings_pt2pl = nullptr;
-nanogui::CheckBox* cbViewPairings_pt2ln = nullptr;
+nanogui::CheckBox* cbViewPairings_pt2pt   = nullptr;
+nanogui::CheckBox* cbViewPairings_pt2pl   = nullptr;
+nanogui::CheckBox* cbViewPairings_pt2ln   = nullptr;
+nanogui::CheckBox* cbViewPairings_cov2cov = nullptr;
 
 nanogui::TextBox *tbLogPose = nullptr, *tbInitialGuess = nullptr, *tbInit2Final = nullptr,
                  *tbCovariance = nullptr, *tbConditionNumber = nullptr, *tbPairings = nullptr;
 
-nanogui::Slider* slPairingsPl2PlSize   = nullptr;
-nanogui::Slider* slPairingsPl2LnSize   = nullptr;
-nanogui::Slider* slGlobalPointSize     = nullptr;
-nanogui::Slider* slLocalPointSize      = nullptr;
-nanogui::Slider* slMidDepthField       = nullptr;
-nanogui::Slider* slThicknessDepthField = nullptr;
+nanogui::Slider* slPairingsPl2PlSize         = nullptr;
+nanogui::Slider* slPairingsPl2LnSize         = nullptr;
+nanogui::Slider* slPairingsCov2CovDecimation = nullptr;
+nanogui::Slider* slGlobalPointSize           = nullptr;
+nanogui::Slider* slLocalPointSize            = nullptr;
+nanogui::Slider* slMidDepthField             = nullptr;
+nanogui::Slider* slThicknessDepthField       = nullptr;
 nanogui::Label * lbDepthFieldValues = nullptr, *lbDepthFieldMid = nullptr,
                *lbDepthFieldThickness = nullptr;
 
@@ -544,13 +546,29 @@ void main_show_gui()
         pn->setLayout(
             new nanogui::GridLayout(nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
 
+        cbViewPairings_cov2cov = pn->add<nanogui::CheckBox>("View: cov-to-cov");
+        cbViewPairings_cov2cov->setChecked(true);
+        cbViewPairings_cov2cov->setCallback([](bool) { rebuild_3d_view_fast(); });
+
+        pn->add<nanogui::Label>("Decimation:");
+        slPairingsCov2CovDecimation = pn->add<nanogui::Slider>();
+        slPairingsCov2CovDecimation->setRange({0.0f, 3.0f});
+        slPairingsCov2CovDecimation->setValue(500.0f);
+        slPairingsCov2CovDecimation->setCallback([&](float) { rebuild_3d_view_fast(); });
+    }
+
+    {
+        auto pn = tab4->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
         cbViewPairings_pt2pl = pn->add<nanogui::CheckBox>("View: point-to-plane");
         cbViewPairings_pt2pl->setChecked(true);
         cbViewPairings_pt2pl->setCallback([](bool) { rebuild_3d_view_fast(); });
 
         pn->add<nanogui::Label>("Plane size:");
         slPairingsPl2PlSize = pn->add<nanogui::Slider>();
-        slPairingsPl2PlSize->setRange({-2.0f, 2.0f});
+        slPairingsPl2PlSize->setRange({-4.0f, 2.0f});
         slPairingsPl2PlSize->setValue(-1.0f);
         slPairingsPl2PlSize->setCallback([&](float) { rebuild_3d_view_fast(); });
     }
@@ -719,9 +737,11 @@ void main_show_gui()
         LOAD_CB_STATE(cbViewPairings_pt2pt);
         LOAD_CB_STATE(cbViewPairings_pt2pl);
         LOAD_CB_STATE(cbViewPairings_pt2ln);
+        LOAD_CB_STATE(cbViewPairings_cov2cov);
 
         LOAD_SL_STATE(slPairingsPl2PlSize);
         LOAD_SL_STATE(slPairingsPl2LnSize);
+        LOAD_SL_STATE(slPairingsCov2CovDecimation);
         LOAD_SL_STATE(slGlobalPointSize);
         LOAD_SL_STATE(slLocalPointSize);
         LOAD_SL_STATE(slMidDepthField);
@@ -748,11 +768,13 @@ void main_show_gui()
         SAVE_CB_STATE(cbViewVoxelsAsPoints);
         SAVE_CB_STATE(cbViewPairings);
         SAVE_CB_STATE(cbViewPairings_pt2pt);
+        SAVE_CB_STATE(cbViewPairings_cov2cov);
         SAVE_CB_STATE(cbViewPairings_pt2pl);
         SAVE_CB_STATE(cbViewPairings_pt2ln);
 
         SAVE_SL_STATE(slPairingsPl2PlSize);
         SAVE_SL_STATE(slPairingsPl2LnSize);
+        SAVE_SL_STATE(slPairingsCov2CovDecimation);
         SAVE_SL_STATE(slGlobalPointSize);
         SAVE_SL_STATE(slLocalPointSize);
         SAVE_SL_STATE(slMidDepthField);
@@ -837,19 +859,17 @@ void rebuild_3d_view(bool regenerateMaps)
 
     lbICPStats[0]->setValue(logRecords.at(idx).shortFileName());
 
-    lbICPStats[1]->setValue(
-        mrpt::format(
-            "ICP log #%zu | Local: ID:%u%s | Global: ID:%u%s", idx,
-            static_cast<unsigned int>(lr.pcLocal->id ? lr.pcLocal->id.value() : 0),
-            lr.pcLocal->label ? lr.pcLocal->label.value().c_str() : "",
-            static_cast<unsigned int>(lr.pcGlobal->id ? lr.pcGlobal->id.value() : 0),
-            lr.pcGlobal->label ? lr.pcGlobal->label.value().c_str() : ""));
+    lbICPStats[1]->setValue(mrpt::format(
+        "ICP log #%zu | Local: ID:%u%s | Global: ID:%u%s", idx,
+        static_cast<unsigned int>(lr.pcLocal->id ? lr.pcLocal->id.value() : 0),
+        lr.pcLocal->label ? lr.pcLocal->label.value().c_str() : "",
+        static_cast<unsigned int>(lr.pcGlobal->id ? lr.pcGlobal->id.value() : 0),
+        lr.pcGlobal->label ? lr.pcGlobal->label.value().c_str() : ""));
 
-    lbICPStats[2]->setValue(
-        mrpt::format(
-            "Quality: %.02f%% | Iters: %u | Term.Reason: %s", 100.0 * lr.icpResult.quality,
-            static_cast<unsigned int>(lr.icpResult.nIterations),
-            mrpt::typemeta::enum2str(lr.icpResult.terminationReason).c_str()));
+    lbICPStats[2]->setValue(mrpt::format(
+        "Quality: %.02f%% | Iters: %u | Term.Reason: %s", 100.0 * lr.icpResult.quality,
+        static_cast<unsigned int>(lr.icpResult.nIterations),
+        mrpt::typemeta::enum2str(lr.icpResult.terminationReason).c_str()));
 
     lbICPStats[3]->setValue("Global: "s + lr.pcGlobal->contents_summary());
     lbICPStats[4]->setValue("Local: "s + lr.pcLocal->contents_summary());
@@ -874,11 +894,9 @@ void rebuild_3d_view(bool regenerateMaps)
         const auto poseChange =
             lr.icpResult.optimal_tf.mean - mrpt::poses::CPose3D(lr.initialGuessLocalWrtGlobal);
 
-        tbInit2Final->setValue(
-            mrpt::format(
-                "|T|=%.03f [m]  |R|=%.03f [deg]", poseChange.norm(),
-                mrpt::RAD2DEG(
-                    mrpt::poses::Lie::SO<3>::log(poseChange.getRotationMatrix()).norm())));
+        tbInit2Final->setValue(mrpt::format(
+            "|T|=%.03f [m]  |R|=%.03f [deg]", poseChange.norm(),
+            mrpt::RAD2DEG(mrpt::poses::Lie::SO<3>::log(poseChange.getRotationMatrix()).norm())));
     }
 
     const auto                      poseFromCorner = mrpt::poses::CPose3D::Identity();
@@ -900,7 +918,10 @@ void rebuild_3d_view(bool regenerateMaps)
             lbICPIteration->setCaption("Show ICP iteration: FINAL");
         }
 
-        if (cbViewPairings->checked()) pairsToViz = &lr.icpResult.finalPairings;
+        if (cbViewPairings->checked())
+        {
+            pairsToViz = &lr.icpResult.finalPairings;
+        }
     }
     else
     {
@@ -908,9 +929,11 @@ void rebuild_3d_view(bool regenerateMaps)
         slIterationDetails->setRange({.0f, static_cast<float>(lr.iterationsDetails->size() - 1)});
 
         if (mustResetIterationSlider)
+        {
             slIterationDetails->setValue(
                 cbShowInitialPose->checked() ? slIterationDetails->range().first
                                              : slIterationDetails->range().second);
+        }
 
         // final or partial solution?
         auto it = lr.iterationsDetails->begin();
@@ -921,7 +944,10 @@ void rebuild_3d_view(bool regenerateMaps)
         std::advance(it, nIter);
 
         relativePose.mean = it->second.optimalPose;
-        if (cbViewPairings->checked()) pairsToViz = &it->second.pairings;
+        if (cbViewPairings->checked())
+        {
+            pairsToViz = &it->second.pairings;
+        }
 
         lbICPIteration->setCaption(
             "Show ICP iteration: "s + std::to_string(it->first) + "/"s +
@@ -943,13 +969,12 @@ void rebuild_3d_view(bool regenerateMaps)
     const mrpt::poses::CPosePDFGaussian pose2D(relativePose);
 
     // Condition numbers:
-    tbConditionNumber->setValue(
-        mrpt::format(
-            " cn{XYZ}=%.02f cn{SO(3)}=%.02f cn{SE(2)}=%.02f "
-            "cn{SE(3)}=%.02f",
-            conditionNumber(relativePose.cov.blockCopy<3, 3>(0, 0)),
-            conditionNumber(relativePose.cov.blockCopy<3, 3>(3, 3)), conditionNumber(pose2D.cov),
-            conditionNumber(relativePose.cov)));
+    tbConditionNumber->setValue(mrpt::format(
+        " cn{XYZ}=%.02f cn{SO(3)}=%.02f cn{SE(2)}=%.02f "
+        "cn{SE(3)}=%.02f",
+        conditionNumber(relativePose.cov.blockCopy<3, 3>(0, 0)),
+        conditionNumber(relativePose.cov.blockCopy<3, 3>(3, 3)), conditionNumber(pose2D.cov),
+        conditionNumber(relativePose.cov)));
 
     // 3D objects -------------------
     auto glCornerFrom = mrpt::opengl::stock_objects::CornerXYZSimple(0.75f, 3.0f);
@@ -1056,7 +1081,10 @@ void rebuild_3d_view(bool regenerateMaps)
         }
 
         // show/hide:
-        if (!cb->checked()) continue;  // hidden
+        if (!cb->checked())
+        {
+            continue;  // hidden
+        }
         rpLocal.points.visible = true;
 
         auto& rpL                       = rpLocal.points.perLayer[lyName];
@@ -1077,7 +1105,9 @@ void rebuild_3d_view(bool regenerateMaps)
     {
         // Show all or selected layers:
         for (auto& rpL : rpLocal.points.perLayer)
+        {
             rpL.second.color = mrpt::img::TColor(0x00, 0x00, 0xff, 0xff);
+        }
 
         auto glPts   = lr.pcLocal->get_visualization(rpLocal);
         lastLocalPts = glPts;
@@ -1124,11 +1154,18 @@ void rebuild_3d_view(bool regenerateMaps)
     // viz pairings:
     if (pairsToViz)
     {
+        const double planeCovScale = std::pow(10.0, slPairingsPl2PlSize->value());
+
         mp2p_icp::pairings_render_params_t rp;
 
         rp.pt2pt.visible        = cbViewPairings_pt2pt->checked();
         rp.pt2pl.visible        = cbViewPairings_pt2pl->checked();
-        rp.pt2pl.planePatchSize = std::pow(10.0, slPairingsPl2PlSize->value());
+        rp.pt2pl.planePatchSize = planeCovScale;
+
+        rp.cov2cov.visible = cbViewPairings_cov2cov->checked();
+        rp.cov2cov.decimation =
+            static_cast<std::size_t>(std::pow(10.0, slPairingsCov2CovDecimation->value()));
+        rp.cov2cov.covScale = planeCovScale;
 
         rp.pt2ln.visible    = cbViewPairings_pt2ln->checked();
         rp.pt2ln.lineLength = std::pow(10.0, slPairingsPl2LnSize->value());
@@ -1182,7 +1219,10 @@ int main(int argc, char** argv)
     try
     {
         // Parse arguments:
-        if (!cmd.parse(argc, argv)) return 1;  // should exit.
+        if (!cmd.parse(argc, argv))
+        {
+            return 1;  // should exit.
+        }
 
         // Load plugins:
         if (arg_plugins.isSet())
