@@ -27,9 +27,6 @@ include(CMakePackageConfigHelpers)
 # Instrumental lib:
 add_library(${PROJECT_NAME} INTERFACE)
 
-# Project version:
-include(mola-version.cmake)
-
 # Allow build-time finding of this package:
 set(mola_common_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Path to mola_common")
 
@@ -65,7 +62,6 @@ if ((NOT DETECTED_ROS2) AND (NOT DETECTED_ROS1))
 		FILES
 			${CMAKE_BINARY_DIR}/${PROJECT_NAME}-config.cmake
 			${CMAKE_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
-			${CMAKE_SOURCE_DIR}/mola-version.cmake
 			DESTINATION
 				share/${PROJECT_NAME}/cmake
 	)
