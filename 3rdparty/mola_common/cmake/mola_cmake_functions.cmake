@@ -16,20 +16,8 @@ include(CMakePackageConfigHelpers)
 #   include(mola_cmake_functions)
 #
 
-# Project version:
-if (mola_common_VERSION)  # If installed via colcon+ament
-  set(MOLA_VERSION_NUMBER_MAJOR ${mola_common_VERSION_MAJOR})
-  set(MOLA_VERSION_NUMBER_MINOR ${mola_common_VERSION_MINOR})
-  set(MOLA_VERSION_NUMBER_PATCH ${mola_common_VERSION_PATCH})
-else() # Installed without ament:
-  include(${CMAKE_CURRENT_LIST_DIR}/mola-version.cmake)
-endif()
 
 set(_MOLACOMMON_MODULE_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
-
-if (NOT DEFINED MOLA_VERSION_NUMBER_MAJOR)
-  message(ERROR "MOLA_VERSION_NUMBER_MAJOR not defined: use `find_package(mola_common)`")
-endif()
 
 # Avoid the need for DLL export/import macros in Windows:
 if (WIN32)
@@ -62,17 +50,6 @@ if (MSVC)
   set(MOLA_COMPILER_NAME "msvc${MSVC_VERSION_3D}")
 else()
   set(MOLA_COMPILER_NAME "${CMAKE_CXX_COMPILER_ID}")
-endif()
-
-# Build DLL full name:
-if (WIN32)
-  set(MOLA_DLL_VERSION_POSTFIX
-    "${MOLA_VERSION_NUMBER_MAJOR}${MOLA_VERSION_NUMBER_MINOR}${MOLA_VERSION_NUMBER_PATCH}_${MOLA_COMPILER_NAME}_x${MOLA_WORD_SIZE}")
-  if ($ENV{VERBOSE})
-    message(STATUS "Using DLL version postfix: ${MOLA_DLL_VERSION_POSTFIX}")
-  endif()
-else()
-  set(MOLA_DLL_VERSION_POSTFIX "")
 endif()
 
 # Group projects in "folders"
@@ -187,14 +164,38 @@ function(mola_configure_library TARGETNAME)
       PRIVATE src
     )
 
+  # ---------
+  # Project version: autodetect from caller package.xml
+  # Example line:" <version>0.3.2</version>"
+  file(READ ${CMAKE_SOURCE_DIR}/package.xml contentPackageXML)
+  string(REGEX MATCH "<version>([0-9\.]*)</version>" _ ${contentPackageXML})
+  set(MP2P_ICP_VERSION ${CMAKE_MATCH_1})
+  message(STATUS "MP2P_ICP version: ${MP2P_ICP_VERSION} (detected in package.xml)")
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _ ${MP2P_ICP_VERSION})
+  set(PKG_VERSION_NUMBER_MAJOR ${CMAKE_MATCH_1})
+  set(PKG_VERSION_NUMBER_MINOR ${CMAKE_MATCH_2})
+  set(PKG_VERSION_NUMBER_PATCH ${CMAKE_MATCH_3})
+  # Build DLL full name:
+  if (WIN32)
+    set(MOLA_DLL_VERSION_POSTFIX
+      "${PKG_VERSION_NUMBER_MAJOR}${PKG_VERSION_NUMBER_MINOR}${PKG_VERSION_NUMBER_PATCH}_${MOLA_COMPILER_NAME}_x${MOLA_WORD_SIZE}")
+    if ($ENV{VERBOSE})
+      message(STATUS "Using DLL version postfix: ${MOLA_DLL_VERSION_POSTFIX}")
+    endif()
+  else()
+    set(MOLA_DLL_VERSION_POSTFIX "")
+  endif()
+  # ---------
+
+
   # Dynamic libraries output options:
   # -----------------------------------
   set_target_properties(${TARGETNAME} PROPERTIES
     OUTPUT_NAME "${TARGETNAME}${MOLA_DLL_VERSION_POSTFIX}"
     COMPILE_PDB_NAME "${TARGETNAME}${MOLA_DLL_VERSION_POSTFIX}"
     COMPILE_PDB_NAME_DEBUG "${TARGETNAME}${MOLA_DLL_VERSION_POSTFIX}${CMAKE_DEBUG_POSTFIX}"
-    VERSION "${MOLA_VERSION_NUMBER_MAJOR}.${MOLA_VERSION_NUMBER_MINOR}.${MOLA_VERSION_NUMBER_PATCH}"
-    SOVERSION ${MOLA_VERSION_NUMBER_MAJOR}.${MOLA_VERSION_NUMBER_MINOR}
+    VERSION "${PKG_VERSION_NUMBER_MAJOR}.${PKG_VERSION_NUMBER_MINOR}.${PKG_VERSION_NUMBER_PATCH}"
+    SOVERSION ${PKG_VERSION_NUMBER_MAJOR}.${PKG_VERSION_NUMBER_MINOR}
     )
 
   # Project "folder":
@@ -236,7 +237,7 @@ function(mola_configure_library TARGETNAME)
   # Version file:
   write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/${TARGETNAME}-config-version.cmake"
-    VERSION ${MOLA_VERSION_NUMBER_MAJOR}.${MOLA_VERSION_NUMBER_MINOR}.${MOLA_VERSION_NUMBER_PATCH}
+    VERSION ${PKG_VERSION_NUMBER_MAJOR}.${PKG_VERSION_NUMBER_MINOR}.${PKG_VERSION_NUMBER_PATCH}
     COMPATIBILITY AnyNewerVersion
   )
 
