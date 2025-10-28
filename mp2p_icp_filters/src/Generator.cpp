@@ -41,6 +41,7 @@
 #include <mrpt/obs/CObservationVelodyneScan.h>
 #include <mrpt/obs/CSensoryFrame.h>
 #include <mrpt/system/filesystem.h>
+#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(Generator, mrpt::rtti::CObject, mp2p_icp_filters)
 
@@ -198,6 +199,7 @@ bool Generator::filterVelodyneScan(  //
     return true;  // implemented
 }
 
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
 class ImuTransformerManager
 {
    public:
@@ -220,9 +222,11 @@ class ImuTransformerManager
 
 std::mutex                                       ImuTransformerManager::mutex_;
 std::map<std::string, mola::imu::ImuTransformer> ImuTransformerManager::transformers_;
+#endif
 
 bool Generator::processIMU(const mrpt::obs::CObservationIMU& imu_raw) const
 {
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
     auto* parameterSource = const_cast<mp2p_icp::ParameterSource*>(attachedSource());
     if (!parameterSource)
     {
@@ -253,6 +257,10 @@ bool Generator::processIMU(const mrpt::obs::CObservationIMU& imu_raw) const
     }
 
     return true;  // implemented
+#else
+    (void)imu_raw;
+    return false;  // Not implemented
+#endif
 }
 
 bool Generator::filterScan3D(  //
@@ -294,10 +302,17 @@ bool Generator::filterPointCloud(  //
 
     const mrpt::poses::CPose3D p = robotPose ? robotPose.value() + sensorPose : sensorPose;
 
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    outPc->registerPointFieldsFrom(pc);
+#endif
     outPc->insertAnotherMap(&pc, p);
 
     const bool sanityPassed = mp2p_icp::pointcloud_sanity_check(*outPc);
     ASSERT_(sanityPassed);
+
+    MRPT_LOG_DEBUG_FMT(
+        "[filterPointCloud] Ended with layer '%s' having: %s", params.target_layer.c_str(),
+        outPc->asString().c_str());
 
     return true;
 }
@@ -471,6 +486,7 @@ bool Generator::implProcessDefault(
         processed = processIMU(*oIMU);
     }
 
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
     if (auto ps = this->attachedSource(); ps != nullptr && pointcloud_obs_timestamp)
     {
         const auto refStamp = mrpt::Clock::toDouble(*pointcloud_obs_timestamp);
@@ -479,6 +495,7 @@ bool Generator::implProcessDefault(
 
         ps->localVelocityBuffer.set_reference_zero_time(refStamp);
     }
+#endif
 
     // done?
     if (processed)
