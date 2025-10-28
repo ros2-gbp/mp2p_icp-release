@@ -21,6 +21,7 @@
 #include <mp2p_icp_filters/FilterCurvature.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/version.h>
 
 // #define DEBUG_GL
 
@@ -98,17 +99,25 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
         true,
         /* create cloud of the same type */
         pcPtr->GetRuntimeClass()->className);
-    if (outPcOther) outPcOther->reserve(outPcOther->size() + pc.size() / 10);
+    if (outPcOther)
+    {
+        outPcOther->reserve(outPcOther->size() + pc.size() / 10);
+    }
 
     ASSERTMSG_(
         outPcLarger || outPcSmaller,
         "At least one 'output_layer_larger_curvature' or "
         "'output_layer_smaller_curvature' output layers must be provided.");
 
-    const auto& xs       = pc.getPointsBufferRef_x();
-    const auto& ys       = pc.getPointsBufferRef_y();
-    const auto& zs       = pc.getPointsBufferRef_z();
+    const auto& xs = pc.getPointsBufferRef_x();
+    const auto& ys = pc.getPointsBufferRef_y();
+    const auto& zs = pc.getPointsBufferRef_z();
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    const auto* ptrRings = pc.getPointsBufferRef_float_field("ring");
+#else
     const auto* ptrRings = pc.getPointsBufferRef_ring();
+#endif
     if (!ptrRings || ptrRings->empty())
     {
         THROW_EXCEPTION_FMT(
@@ -121,6 +130,24 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
     ASSERT_EQUAL_(ringPerPt.size(), xs.size());
 
     const size_t N = xs.size();
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    mrpt::maps::CPointsMap::InsertCtx ctxLarger;
+    if (outPcLarger)
+    {
+        ctxLarger = outPcLarger->prepareForInsertPointsFrom(pc);
+    }
+    mrpt::maps::CPointsMap::InsertCtx ctxSmaller;
+    if (outPcSmaller)
+    {
+        ctxSmaller = outPcSmaller->prepareForInsertPointsFrom(pc);
+    }
+    mrpt::maps::CPointsMap::InsertCtx ctxOther;
+    if (outPcOther)
+    {
+        ctxOther = outPcOther->prepareForInsertPointsFrom(pc);
+    }
+#endif
 
     const uint16_t nRings = 1 + *std::max_element(ringPerPt.begin(), ringPerPt.end());
 
@@ -142,7 +169,7 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
 
     for (size_t i = 0; i < N; i++)
     {
-        auto& trg = idxPerRing.at(ringPerPt[i]);
+        auto& trg = idxPerRing.at(static_cast<std::size_t>(ringPerPt[i]));
 
 #ifdef DEBUG_GL
         auto ringId = ringPerPt[i];
@@ -159,7 +186,9 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
             const auto d      = pt - lastPt;
 
             if (mrpt::max3(std::abs(d.x), std::abs(d.y), std::abs(d.z)) < params.min_clearance)
+            {
                 continue;
+            }
         }
 
         // accept the point:
@@ -191,12 +220,19 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
         if (idxs.size() <= 3)
         {
             // If we have too few points, just accept them as they are so few we
-            // cannot run the clasification method below.
+            // cannot run the clarification method below.
             for (size_t idx = 0; idx < idxs.size(); idx++)
             {
                 const size_t i = idxs[idx];
                 counterLarger++;
-                if (outPcLarger) outPcLarger->insertPointFrom(pc, i);
+                if (outPcLarger)
+                {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+                    outPcLarger->insertPointFrom(pc, i, ctxLarger);
+#else
+                    outPcLarger->insertPointFrom(pc, i);
+#endif
+                }
             }
             continue;
         }
@@ -220,11 +256,25 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
                 if (pt.sqrNorm() < ptm1.sqrNorm())
                 {
                     counterLarger++;
-                    if (outPcLarger) outPcLarger->insertPointFrom(pc, i);
+                    if (outPcLarger)
+                    {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+                        outPcLarger->insertPointFrom(pc, i, ctxLarger);
+#else
+                        outPcLarger->insertPointFrom(pc, i);
+#endif
+                    }
                 }
                 else
                 {
-                    if (outPcOther) outPcOther->insertPointFrom(pc, i);
+                    if (outPcOther)
+                    {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+                        outPcOther->insertPointFrom(pc, i, ctxOther);
+#else
+                        outPcOther->insertPointFrom(pc, i);
+#endif
+                    }
                 }
                 continue;
             }
@@ -239,12 +289,26 @@ void FilterCurvature::filter(mp2p_icp::metric_map_t& inOut) const
             if (std::abs(score) < params.max_cosine * v1n * v2n)
             {
                 counterLarger++;
-                if (outPcLarger) outPcLarger->insertPointFrom(pc, i);
+                if (outPcLarger)
+                {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+                    outPcLarger->insertPointFrom(pc, i, ctxLarger);
+#else
+                    outPcLarger->insertPointFrom(pc, i);
+#endif
+                }
             }
             else
             {
                 counterLess++;
-                if (outPcSmaller) outPcSmaller->insertPointFrom(pc, i);
+                if (outPcSmaller)
+                {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+                    outPcSmaller->insertPointFrom(pc, i, ctxSmaller);
+#else
+                    outPcSmaller->insertPointFrom(pc, i);
+#endif
+                }
             }
         }
     }
