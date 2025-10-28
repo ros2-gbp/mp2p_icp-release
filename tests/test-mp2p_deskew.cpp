@@ -29,6 +29,7 @@
 #include <mrpt/obs/CObservationComment.h>
 #include <mrpt/obs/CObservationPointCloud.h>
 #include <mrpt/poses/CPose3DInterpolator.h>
+#include <mrpt/version.h>
 
 #include <random>
 
@@ -265,7 +266,12 @@ mrpt::maps::CPointsMapXYZIRT::Ptr simulate_skewed_points(
 
         // Add to map, with time offset
         pts->insertPointFast(pt_local.x, pt_local.y, pt_local.z);
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+        pts->insertPointField_float("t", static_cast<float>(rel_time));
+#else
         pts->insertPointField_Timestamp(static_cast<float>(rel_time));
+#endif
 
 #if 0
         std::cout << "PT[" << i << "] x: " << pt_local.x << ", y: " << pt_local.y
@@ -638,7 +644,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
         {
             std::cout
                 << (use_sm2mm != 0 ? "\n######### Using FilterDesk directly\n"
-                                   : "\n######### Using ms2mm() function\n");
+                                   : "\n######### Using sm2mm() function\n");
 
             for (const auto& [lin, ang] : test_velocities)
             {
