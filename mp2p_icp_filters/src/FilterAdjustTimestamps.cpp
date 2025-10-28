@@ -20,6 +20,7 @@
 
 #include <mp2p_icp_filters/FilterAdjustTimestamps.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/version.h>
 
 #include <optional>
 
@@ -74,7 +75,11 @@ void FilterAdjustTimestamps::filter(mp2p_icp::metric_map_t& inOut) const
         return;
     }
 
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    auto* TsPtr = pc.getPointsBufferRef_float_field("t");
+#else
     auto* TsPtr = pc.getPointsBufferRef_timestamp();
+#endif
 
     if (TsPtr == nullptr || (TsPtr->empty() && !pc.empty()))
     {
@@ -153,8 +158,10 @@ void FilterAdjustTimestamps::filter(mp2p_icp::metric_map_t& inOut) const
 
     if (ps)
     {
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
         ps->localVelocityBuffer.set_reference_zero_time(
             ps->localVelocityBuffer.get_reference_zero_time() + dt);
+#endif
     }
 
     MRPT_END
