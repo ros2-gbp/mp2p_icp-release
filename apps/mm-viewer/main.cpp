@@ -33,6 +33,7 @@
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/os.h>  // loadPluginModules()
 #include <mrpt/system/string_utils.h>  // unitsFormat()
+#include <mrpt/version.h>
 
 #include <iostream>
 
@@ -762,7 +763,10 @@ void main_show_gui()
             btnAnimate->setCallback(
                 []()
                 {
-                    if (camTravelling.empty()) return;
+                    if (camTravelling.empty())
+                    {
+                        return;
+                    }
                     camTravellingCurrentTime.emplace(
                         mrpt::Clock::toDouble(camTravelling.begin()->first));
                     btnAnimate->setEnabled(false);
@@ -938,12 +942,20 @@ void doColorizeByIntensity(
     }
 
     // Colorize by intensity with custom color map?
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    if (!org_cloud || !org_cloud->hasPointField("intensity"))
+#else
     if (!org_cloud || !org_cloud->hasField_Intensity())
+#endif
     {
         return;
     }
 
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    const auto* Is = org_cloud->getPointsBufferRef_float_field("intensity");
+#else
     const auto* Is = org_cloud->getPointsBufferRef_intensity();
+#endif
     ASSERT_(Is);
 
     // Thread-local cache for max intensity
@@ -1181,16 +1193,17 @@ void rebuild_3d_view(bool force_rebuild_view)
         const auto depthFieldMid       = std::pow(10.0, slMidDepthField->value());
         const auto depthFieldThickness = std::pow(10.0, slThicknessDepthField->value());
 
-        const auto clipNear = std::max(1e-2, depthFieldMid - 0.5 * depthFieldThickness);
-        const auto clipFar  = depthFieldMid + 0.5 * depthFieldThickness;
+        const auto clipNear =
+            static_cast<float>(std::max(1e-2, depthFieldMid - 0.5 * depthFieldThickness));
+        const auto clipFar = static_cast<float>(depthFieldMid + 0.5 * depthFieldThickness);
 
         const float cameraFOV = slCameraFOV->value();
         win->camera().setCameraFOV(cameraFOV);
-        win->camera().setMaximumZoom(std::max<double>(1000, 3.0 * clipFar));
+        win->camera().setMaximumZoom(std::max<float>(1000.0f, 3.0f * clipFar));
 
         lbDepthFieldValues->setCaption(
             mrpt::format("Depth field: near=%g far=%g", clipNear, clipFar));
-        lbDepthFieldMid->setCaption(mrpt::format("Frustrum center: %.03g", depthFieldMid));
+        lbDepthFieldMid->setCaption(mrpt::format("Frustum center: %.03g", depthFieldMid));
         lbDepthFieldThickness->setCaption(
             mrpt::format("Frustum thickness: %.03g", depthFieldThickness));
 
@@ -1263,6 +1276,16 @@ int main(int argc, char** argv)
         }
 
         main_show_gui();
+
+        // Clean up OpenGL objects before closing the window:
+        glVizMap.reset();
+        glGrid.reset();
+        glENUCorner.reset();
+        glMapCorner.reset();
+        glTrajectory.reset();
+        // then, the window:
+        win.reset();
+
         return 0;
     }
     catch (std::exception& e)
