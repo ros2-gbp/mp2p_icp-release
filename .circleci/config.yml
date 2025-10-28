@@ -1,13 +1,16 @@
-version: 2
+version: 2.1
 jobs:
-  gcc-u2204-mrpt-dev:
+  gcc-u2404-mrpt-dev:
     docker:
-      - image: mrpt/mrpt-build-env:full-jammy
+      - image: ubuntu:24.04
     steps:
       - run:
           name: "Install dependencies"
           command: |
+            export DEBIAN_FRONTEND=noninteractive
+            export TZ=Etc/UTC
             apt-get update
+            apt-get install build-essential cmake git -y
             apt-get install software-properties-common -y
             add-apt-repository ppa:joseluisblancoc/mrpt -y
             apt-get install libmrpt-dev -y
@@ -22,17 +25,20 @@ jobs:
           command: cmake -H. -Bbuild
       - run: make -C build
       - run: make CTEST_OUTPUT_ON_FAILURE=1 test -C build
-#      - run: make gcov -C build
-#      - run: make -C build
-#      - run: bash <(curl -s https://codecov.io/bash) -X gcov -y .codecov.yml -s build
-  gcc-u2204-mrpt-stable:
+  #      - run: make gcov -C build
+  #      - run: make -C build
+  #      - run: bash <(curl -s https://codecov.io/bash) -X gcov -y .codecov.yml -s build
+  gcc-u2404-mrpt-stable:
     docker:
-      - image: mrpt/mrpt-build-env:full-jammy
+      - image: ubuntu:24.04
     steps:
       - run:
           name: "Install dependencies"
           command: |
+            export DEBIAN_FRONTEND=noninteractive
+            export TZ=Etc/UTC
             apt-get update
+            apt-get install build-essential cmake git -y
             apt-get install software-properties-common -y
             add-apt-repository ppa:joseluisblancoc/mrpt-stable -y
             apt-get install libmrpt-dev -y
@@ -47,17 +53,21 @@ jobs:
           command: cmake -H. -Bbuild
       - run: make -C build
       - run: make CTEST_OUTPUT_ON_FAILURE=1 test -C build
-  clang-u2204-mrpt-dev:
+  clang-u2404-mrpt-dev:
     docker:
-      - image: mrpt/mrpt-build-env:full-jammy
+      - image: ubuntu:24.04
     steps:
       - run:
           name: "Install dependencies"
           command: |
+            export DEBIAN_FRONTEND=noninteractive
+            export TZ=Etc/UTC
             apt-get update
+            apt-get install build-essential cmake git -y
             apt-get install software-properties-common -y
             add-apt-repository ppa:joseluisblancoc/mrpt -y
             apt-get install libmrpt-dev -y
+            apt-get install -y clang-18
       - checkout
       - run:
           name: "Pull Submodules"
@@ -68,14 +78,14 @@ jobs:
           name: Generate cmake files
           command: cmake -H. -Bbuild
           environment:
-            CC: /usr/bin/clang
-            CXX: /usr/bin/clang++
+            CC: /usr/bin/clang-18
+            CXX: /usr/bin/clang++-18
       - run: make -C build
       - run: make CTEST_OUTPUT_ON_FAILURE=1 test -C build
 workflows:
   version: 2
   build:
     jobs:
-      - gcc-u2204-mrpt-dev
-      - gcc-u2204-mrpt-stable
-      - clang-u2204-mrpt-dev
+      - gcc-u2404-mrpt-dev
+      - gcc-u2404-mrpt-stable
+      - clang-u2404-mrpt-dev
