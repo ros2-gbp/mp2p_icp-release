@@ -21,6 +21,7 @@
 #include <mp2p_icp_filters/FilterByIntensity.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(FilterByIntensity, mp2p_icp_filters::FilterBase, mp2p_icp_filters)
 
@@ -107,21 +108,38 @@ void FilterByIntensity::filter(mp2p_icp::metric_map_t& inOut) const
         "provided.");
 
     const auto& xs = pc.getPointsBufferRef_x();
-    // const auto& ys   = pc.getPointsBufferRef_y();
-    // const auto& zs   = pc.getPointsBufferRef_z();
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    const auto* ptrI = pc.getPointsBufferRef_float_field("intensity");
+#else
     const auto* ptrI = pc.getPointsBufferRef_intensity();
+#endif
     if (!ptrI || ptrI->empty())
     {
         THROW_EXCEPTION_FMT(
-            "Error: this filter needs the input layer '%s' to has an "
-            "'intensity' "
-            "point channel.",
+            "Error: this filter needs the input layer '%s' to has an 'intensity' point channel.",
             params.input_pointcloud_layer.c_str());
     }
 
     const auto& Is = *ptrI;
     ASSERT_EQUAL_(Is.size(), xs.size());
     const size_t N = xs.size();
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    mrpt::maps::CPointsMap::InsertCtx ctxLow, ctxHigh, ctxMid;
+    if (outLow)
+    {
+        ctxLow = outLow->prepareForInsertPointsFrom(pc);
+    }
+    if (outHigh)
+    {
+        ctxHigh = outHigh->prepareForInsertPointsFrom(pc);
+    }
+    if (outMid)
+    {
+        ctxMid = outMid->prepareForInsertPointsFrom(pc);
+    }
+#endif
 
     size_t countLow = 0, countMid = 0, countHigh = 0;
 
@@ -131,25 +149,41 @@ void FilterByIntensity::filter(mp2p_icp::metric_map_t& inOut) const
 
         mrpt::maps::CPointsMap* trg = nullptr;
 
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+        mrpt::maps::CPointsMap::InsertCtx* ctx = nullptr;
+#endif
         if (I < params.low_threshold)
         {
             trg = outLow.get();
             ++countLow;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            ctx = &ctxLow;
+#endif
         }
         else if (I > params.high_threshold)
         {
             trg = outHigh.get();
             ++countHigh;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            ctx = &ctxHigh;
+#endif
         }
         else
         {
             trg = outMid.get();
             ++countMid;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            ctx = &ctxMid;
+#endif
         }
 
         if (trg)
         {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            trg->insertPointFrom(pc, i, *ctx);
+#else
             trg->insertPointFrom(pc, i);
+#endif
         }
     }
 
