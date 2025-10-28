@@ -21,6 +21,7 @@
 #include <mp2p_icp_filters/FilterByRing.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/version.h>
 
 IMPLEMENTS_MRPT_OBJECT(FilterByRing, mp2p_icp_filters::FilterBase, mp2p_icp_filters)
 
@@ -81,7 +82,10 @@ void FilterByRing::filter(mp2p_icp::metric_map_t& inOut) const
         /* create cloud of the same type */
         pcPtr->GetRuntimeClass()->className);
 
-    if (outSelected) outSelected->reserve(outSelected->size() + pc.size() / 10);
+    if (outSelected)
+    {
+        outSelected->reserve(outSelected->size() + pc.size() / 10);
+    }
 
     // Create if new: Append to existing layer, if already existed.
     mrpt::maps::CPointsMap::Ptr outNonSel = GetOrCreatePointLayer(
@@ -89,7 +93,10 @@ void FilterByRing::filter(mp2p_icp::metric_map_t& inOut) const
         /* create cloud of the same type */
         pcPtr->GetRuntimeClass()->className);
 
-    if (outNonSel) outNonSel->reserve(outNonSel->size() + pc.size() / 10);
+    if (outNonSel)
+    {
+        outNonSel->reserve(outNonSel->size() + pc.size() / 10);
+    }
 
     ASSERTMSG_(
         outSelected || outNonSel,
@@ -97,9 +104,13 @@ void FilterByRing::filter(mp2p_icp::metric_map_t& inOut) const
         "'output_layer_non_selected' must be provided.");
 
     const auto& xs = pc.getPointsBufferRef_x();
-    // const auto& ys   = pc.getPointsBufferRef_y();
-    // const auto& zs   = pc.getPointsBufferRef_z();
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    const auto* ptrR = pc.getPointsBufferRef_float_field("ring");
+#else
     const auto* ptrR = pc.getPointsBufferRef_ring();
+#endif
+
     if (!ptrR || ptrR->empty())
     {
         THROW_EXCEPTION_FMT(
@@ -107,6 +118,19 @@ void FilterByRing::filter(mp2p_icp::metric_map_t& inOut) const
             "'ring' point channel.",
             params.input_pointcloud_layer.c_str());
     }
+
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+    mrpt::maps::CPointsMap::InsertCtx ctxSelected;
+    if (outSelected)
+    {
+        ctxSelected = outSelected->prepareForInsertPointsFrom(pc);
+    }
+    mrpt::maps::CPointsMap::InsertCtx ctxNotSelected;
+    if (outNonSel)
+    {
+        ctxNotSelected = outNonSel->prepareForInsertPointsFrom(pc);
+    }
+#endif
 
     const auto& Rs = *ptrR;
     ASSERT_EQUAL_(Rs.size(), xs.size());
@@ -119,19 +143,35 @@ void FilterByRing::filter(mp2p_icp::metric_map_t& inOut) const
         const auto R = Rs[i];
 
         mrpt::maps::CPointsMap* trg = nullptr;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+        mrpt::maps::CPointsMap::InsertCtx* ctx = nullptr;
+#endif
 
         if (params.selected_ring_ids.count(R) != 0)
         {
             trg = outSelected.get();
             ++countSel;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            ctx = &ctxSelected;
+#endif
         }
         else
         {
             trg = outNonSel.get();
             ++countNon;
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            ctx = &ctxNotSelected;
+#endif
         }
 
-        if (trg) trg->insertPointFrom(pc, i);
+        if (trg)
+        {
+#if MRPT_VERSION >= 0x020f00  // 2.15.0
+            trg->insertPointFrom(pc, i, *ctx);
+#else
+            trg->insertPointFrom(pc, i);
+#endif
+        }
     }
 
     MRPT_LOG_DEBUG_STREAM(
