@@ -25,6 +25,7 @@
 
 #include <mp2p_icp_filters/FilterAdjustTimestamps.h>
 #include <mp2p_icp_filters/FilterBoundingBox.h>
+#include <mp2p_icp_filters/FilterByExpression.h>
 #include <mp2p_icp_filters/FilterByIntensity.h>
 #include <mp2p_icp_filters/FilterByRange.h>
 #include <mp2p_icp_filters/FilterByRing.h>
@@ -40,6 +41,7 @@
 #include <mp2p_icp_filters/FilterNormalizeIntensity.h>
 #include <mp2p_icp_filters/FilterPoleDetector.h>
 #include <mp2p_icp_filters/FilterRemoveByVoxelOccupancy.h>
+#include <mp2p_icp_filters/FilterSOR.h>
 #include <mp2p_icp_filters/FilterVoxelSlice.h>
 #include <mp2p_icp_filters/Generator.h>
 #include <mp2p_icp_filters/GeneratorEdgesFromCurvature.h>
@@ -59,6 +61,7 @@ MRPT_INITIALIZER(register_mola_lidar_segmentation)
     registerClass(CLASS_ID(mp2p_icp_filters::FilterAdjustTimestamps));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBase));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBoundingBox));
+    registerClass(CLASS_ID(mp2p_icp_filters::FilterByExpression));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterByIntensity));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterByRange));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterByRing));
@@ -74,5 +77,6 @@ MRPT_INITIALIZER(register_mola_lidar_segmentation)
     registerClass(CLASS_ID(mp2p_icp_filters::FilterNormalizeIntensity));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterPoleDetector));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterRemoveByVoxelOccupancy));
+    registerClass(CLASS_ID(mp2p_icp_filters::FilterSOR));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterVoxelSlice));
 }
