@@ -38,16 +38,23 @@
         "deskewed",
         "eigen",
         "linearization",
+        "Mañas",
         "recolorize",
         "relinearization",
         "reproject",
         "tfest",
+        "unitarize",
         "unrealize",
         "voxelizes",
         "voxelmaps",
         "XYZIRT"
     ],
     "cSpell.ignoreWords": [
-        "Bonxai"
+        "Bonxai",
+        "ENTYPO",
+        "GLFW",
+        "TBoundingBoxf",
+        "imLinear2Neig",
+        "jacob_dDexpe_de"
     ]
 }
