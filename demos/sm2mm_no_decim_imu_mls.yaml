@@ -34,7 +34,7 @@ filters:
       method: MotionCompensationMethod::IMU
       silently_ignore_no_timestamps: false
 
-      output_layer_class: "mrpt::maps::CPointsMapXYZIRT" # Keep intensity & ring channels
+      output_layer_class: "mrpt::maps::CGenericPointsMap" # Keep all channels: intensity, ring, ...
 
       # These (vx,...,wz) are variable names that must be defined via the
       # mp2p_icp::Parameterizable API to update them dynamically.
@@ -83,6 +83,10 @@ final_filters:
       # The layer where the smoothed/projected points and their normals will be
       # stored. If it doesn't exist, it will be created.
       output_pointcloud_layer: "mls"
+
+      # The class name for output layer if it does not exist and needs to be
+      # created. Empty means same class than input.
+      output_layer_class: "mrpt::maps::CGenericPointsMap"
 
       # ====================================================================
       # MLS Core Parameters
