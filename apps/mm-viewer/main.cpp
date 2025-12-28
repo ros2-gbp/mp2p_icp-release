@@ -33,6 +33,7 @@
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/os.h>  // loadPluginModules()
 #include <mrpt/system/string_utils.h>  // unitsFormat()
+#include <mrpt/topography/conversions.h>
 #include <mrpt/version.h>
 
 #include <iostream>
@@ -42,6 +43,9 @@
 constexpr const char* APP_NAME        = "mm-viewer";
 constexpr int         MID_FONT_SIZE   = 14;
 constexpr int         SMALL_FONT_SIZE = 13;
+
+constexpr const char* FIRST_MINI_VIEW_NAME  = "small-view-1";
+constexpr const char* SECOND_MINI_VIEW_NAME = "small-view-2";
 
 // =========== Declare supported cli switches ===========
 static TCLAP::CmdLine cmd(APP_NAME);
@@ -67,35 +71,39 @@ mrpt::opengl::CSetOfObjects::Ptr glTrajectory;
 
 mrpt::gui::CDisplayWindowGUI::Ptr win;
 
-std::array<nanogui::TextBox*, 2> lbMapStats                = {nullptr, nullptr};
-nanogui::CheckBox*               cbApplyGeoRef             = nullptr;
-nanogui::CheckBox*               cbViewOrtho               = nullptr;
-nanogui::CheckBox*               cbView2D                  = nullptr;
-nanogui::CheckBox*               cbViewVoxelsAsPoints      = nullptr;
-nanogui::CheckBox*               cbViewVoxelsFreeSpace     = nullptr;
-nanogui::CheckBox*               cbColorizeMap             = nullptr;
-nanogui::CheckBox*               cbKeepOriginalCloudColors = nullptr;
-nanogui::ComboBox*               cmbColorIntensity         = nullptr;
-nanogui::CheckBox*               cbShowGroundGrid          = nullptr;
-nanogui::Slider*                 slPointSize               = nullptr;
-nanogui::Slider*                 slTrajectoryThickness     = nullptr;
-nanogui::Slider*                 slMidDepthField           = nullptr;
-nanogui::Slider*                 slThicknessDepthField     = nullptr;
-nanogui::Slider*                 slCameraFOV               = nullptr;
-nanogui::Label*                  lbCameraFOV               = nullptr;
-nanogui::Label*                  lbMousePos                = nullptr;
-nanogui::Label*                  lbCameraPointing          = nullptr;
+std::array<nanogui::TextBox*, 2> lbMapStats              = {nullptr, nullptr};
+nanogui::CheckBox*               cbApplyGeoRef           = nullptr;
+nanogui::CheckBox*               cbViewOrtho             = nullptr;
+nanogui::CheckBox*               cbView2D                = nullptr;
+nanogui::CheckBox*               cbViewVoxelsAsPoints    = nullptr;
+nanogui::CheckBox*               cbViewVoxelsFreeSpace   = nullptr;
+nanogui::CheckBox*               cbColorizeMap           = nullptr;
+nanogui::CheckBox*               cbKeepNativeCloudColors = nullptr;
+nanogui::ComboBox*               cmbColorIntensity       = nullptr;
+nanogui::ComboBox*               cmbRecolorizeByField    = nullptr;
+nanogui::CheckBox*               cbShowGroundGrid        = nullptr;
+nanogui::Slider*                 slPointSize             = nullptr;
+nanogui::Slider*                 slTrajectoryThickness   = nullptr;
+nanogui::Slider*                 slMidDepthField         = nullptr;
+nanogui::Slider*                 slThicknessDepthField   = nullptr;
+nanogui::Slider*                 slCameraFOV             = nullptr;
+nanogui::Label*                  lbCameraFOV             = nullptr;
+nanogui::Label*                  lbMousePos              = nullptr;
+nanogui::ComboBox*               cbMouseUnits            = nullptr;
+nanogui::Button*                 btnCopyCoords           = nullptr;
+nanogui::Label*                  lbCameraPointing        = nullptr;
 nanogui::Label *                 lbDepthFieldValues = nullptr, *lbDepthFieldMid = nullptr,
                *lbDepthFieldThickness = nullptr, *lbPointSize = nullptr;
-nanogui::Label*    lbTrajThick      = nullptr;
-nanogui::Widget*   panelLayers      = nullptr;
-nanogui::ComboBox* cbTravellingKeys = nullptr;
-nanogui::TextBox*  edAnimFPS        = nullptr;
-nanogui::Slider*   slAnimProgress   = nullptr;
+nanogui::Label*    lbTrajectoryThick = nullptr;
+nanogui::Widget*   panelLayers       = nullptr;
+nanogui::ComboBox* cbTravellingKeys  = nullptr;
+nanogui::TextBox*  edAnimFPS         = nullptr;
+nanogui::Slider*   slAnimProgress    = nullptr;
 nanogui::Button *  btnAnimate = nullptr, *btnAnimStop = nullptr;
 nanogui::ComboBox* cbTravellingInterp = nullptr;
 
 std::vector<std::string>                  layerNames;
+std::vector<std::string>                  knownPointFields;
 std::map<std::string, nanogui::CheckBox*> cbLayersByName;
 bool                                      doFitView = false;
 
@@ -109,7 +117,7 @@ mrpt::poses::CPose3DInterpolator trajectory;
 mrpt::poses::CPose3DInterpolator camTravelling;
 std::optional<double>            camTravellingCurrentTime;
 
-constexpr float TRAV_ZOOM2ROLL = 1e-4;
+constexpr float TRAVELING_ZOOM2ROLL = 1e-4;
 
 static void rebuild_3d_view(bool force_rebuild_view = false);
 static void onSaveLayers();
@@ -173,6 +181,67 @@ bool loadMapFile(const std::string& mapFile)
         layerNames.push_back(name);
     }
 
+    // Find point cloud field names:
+    {
+        std::set<std::string> fields;
+        fields.insert("x");
+        fields.insert("y");
+        fields.insert("z");
+
+        for (const auto& [name, map] : theMap.layers)
+        {
+            auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(map);
+            if (!pts)
+            {
+                continue;
+            }
+            for (const auto& f : pts->getPointFieldNames_float())
+            {
+                fields.insert(std::string(f));
+            }
+            for (const auto& f : pts->getPointFieldNames_uint16())
+            {
+                fields.insert(std::string(f));
+            }
+#if MRPT_VERSION >= 0x020f03  // 2.15.3
+            for (const auto& f : pts->getPointFieldNames_double())
+            {
+                fields.insert(std::string(f));
+            }
+            for (const auto& f : pts->getPointFieldNames_uint8())
+            {
+                fields.insert(std::string(f));
+            }
+#endif
+        }
+
+        // Handle special color channels:
+        // See reference: mrpt::obs::PointCloudRecoloringParameters
+        // - `rgb` for `{color_r,color_g,color_b}` (uint8_t, in range 0-255)
+        // - `rgbf` for `{color_rf,color_gf,color_bf}` (float, in range 0-1)
+        if (fields.count("color_r") && fields.count("color_g") && fields.count("color_b"))
+        {
+            fields.erase("color_r");
+            fields.erase("color_g");
+            fields.erase("color_b");
+            fields.insert("rgb");
+        }
+        if (fields.count("color_rf") && fields.count("color_gf") && fields.count("color_bf"))
+        {
+            fields.erase("color_rf");
+            fields.erase("color_gf");
+            fields.erase("color_bf");
+            fields.insert("rgbf");
+        }
+
+        // Now convert the set into a vector:
+        knownPointFields.clear();
+        for (const auto& f : fields)
+        {
+            knownPointFields.push_back(f);
+        }
+    }
+
     // sanity checks:
     for (const auto& [name, map] : theMap.layers)
     {
@@ -185,16 +254,98 @@ bool loadMapFile(const std::string& mapFile)
         ASSERTMSG_(
             sanityPassed, mrpt::format("sanity check did not pass for layer: '%s'", name.c_str()));
     }
+
     return true;
+}
+
+/** Transform to show in the selected frame of reference and units: "enu", "map", or "lat/lon" */
+std::string transformAndFormatSelectedPoint(const mrpt::math::TPoint3D& pt)
+{
+    using namespace std::string_literals;
+    const bool ptIsENU = cbApplyGeoRef->checked() && theMap.georeferencing.has_value();
+
+    ASSERT_(cbMouseUnits);
+
+    if (theMap.georeferencing.has_value())
+    {
+        if (cbMouseUnits->items().size() != 3)
+        {
+            cbMouseUnits->setItems(std::vector<std::string>({"map", "enu", "lat/lon "}));
+            cbMouseUnits->setEnabled(true);
+        }
+    }
+    else
+    {
+        if (cbMouseUnits->items().size() != 1)
+        {
+            cbMouseUnits->setItems(std::vector<std::string>({"map"}));
+            cbMouseUnits->setSelectedIndex(0);
+            cbMouseUnits->setEnabled(false);
+        }
+    }
+
+    switch (cbMouseUnits->selectedIndex())
+    {
+        case 0:  // show in map
+        {
+            mrpt::math::TPoint3D ptViz;
+            if (ptIsENU)
+            {
+                ptViz = theMap.georeferencing->T_enu_to_map.mean.inverseComposePoint(pt);
+            }
+            else  // pt is already map
+            {
+                ptViz = pt;
+            }
+            return mrpt::format("X=%6.03f Y=%6.03f Z=%6.03f", ptViz.x, ptViz.y, ptViz.z);
+        }
+        break;
+
+        case 1:  // show in enu
+        {
+            // ptIsENU must be true here.
+            return mrpt::format("X=%6.03f Y=%6.03f Z=%6.03f", pt.x, pt.y, pt.z);
+        }
+        break;
+
+        case 2:  // show as lat/lon
+        {
+            // pt is ENU.
+            try
+            {
+                mrpt::topography::TGeocentricCoords geocentricPt;
+                mrpt::topography::ENUToGeocentric(
+                    pt, theMap.georeferencing->geo_coord, geocentricPt,
+                    mrpt::topography::TEllipsoid::Ellipsoid_WGS84());
+
+                mrpt::topography::TGeodeticCoords outCoords;
+                mrpt::topography::geocentricToGeodetic(geocentricPt, outCoords);
+
+                return mrpt::format(
+                    "%.06f, %.06f, h=%.03f", outCoords.lat.getDecimalValue(),
+                    outCoords.lon.getDecimalValue(), outCoords.height);
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "[transformAndFormatSelectedPoint] " << e.what() << "\n";
+                return {};
+            }
+        }
+        break;
+        default:
+            THROW_EXCEPTION(
+                "Unexpected selection in combo-box for mouse coordinate transformation");
+            break;
+    };
 }
 
 void updateMouseCoordinates()
 {
-    const auto mousexY = win->mousePos();
+    const auto mouse_xy = win->mousePos();
 
     mrpt::math::TLine3D mouse_ray;
     win->background_scene->getViewport("main")->get3DRayForPixelCoord(
-        mousexY.x(), mousexY.y(), mouse_ray);
+        mouse_xy.x(), mouse_xy.y(), mouse_ray);
 
     // Create a 3D plane, e.g. Z=0
     using mrpt::math::TPoint3D;
@@ -208,15 +359,18 @@ void updateMouseCoordinates()
     if (inters.getPoint(inters_pt))
     {
         lbMousePos->setCaption(
-            mrpt::format("Mouse pointing to: X=%6.03f Y=%6.03f", inters_pt.x, inters_pt.y));
+            mrpt::format("Mouse at: %s", transformAndFormatSelectedPoint(inters_pt).c_str()));
     }
 }
 
 void updateCameraLookCoordinates()
 {
-    lbCameraPointing->setCaption(mrpt::format(
-        "Looking at: X=%6.03f Y=%6.03f Z=%6.03f", win->camera().getCameraPointingX(),
-        win->camera().getCameraPointingY(), win->camera().getCameraPointingZ()));
+    const auto pt = mrpt::math::TPoint3D(
+        win->camera().getCameraPointingX(), win->camera().getCameraPointingY(),
+        win->camera().getCameraPointingZ());
+
+    lbCameraPointing->setCaption(
+        mrpt::format("Looking at: %s", transformAndFormatSelectedPoint(pt).c_str()));
 }
 
 void observeViewOptions()
@@ -230,21 +384,67 @@ void observeViewOptions()
 
 void updateMiniCornerView()
 {
-    auto gl_view = win->background_scene->getViewport("small-view");
-    if (!gl_view)
+    auto gl_view1 = win->background_scene->getViewport(FIRST_MINI_VIEW_NAME);
+    if (!gl_view1)
     {
         return;
     }
 
-    mrpt::opengl::CCamera& view_cam = gl_view->getCamera();
+    mrpt::opengl::TFontParams fp;
+    fp.draw_shadow = true;
+    fp.vfont_scale = 9.0f;
 
-    view_cam.setAzimuthDegrees(win->camera().getAzimuthDegrees());
-    view_cam.setElevationDegrees(win->camera().getElevationDegrees());
-    view_cam.setZoomDistance(5);
+    {
+        mrpt::opengl::CCamera& view_cam = gl_view1->getCamera();
+
+        view_cam.setAzimuthDegrees(win->camera().getAzimuthDegrees());
+        view_cam.setElevationDegrees(win->camera().getElevationDegrees());
+        view_cam.setZoomDistance(5);
+    }
+
+    const bool show_two_corners = cbApplyGeoRef->checked() && theMap.georeferencing.has_value();
+
+    gl_view1->addTextMessage(
+        static_cast<double>(win->width()) * 0.05 - 35, 5,
+        show_two_corners ? "ENU frame" : "Map frame", 0, fp);
+
+    auto gl_view2 = win->background_scene->getViewport(SECOND_MINI_VIEW_NAME);
+    if (!gl_view2 || gl_view2->empty())
+    {
+        return;
+    }
+
+    auto glRoot = *gl_view2->begin();
+    if (!glRoot)
+    {
+        return;
+    }
+    glRoot->setVisibility(show_two_corners);
+
+    if (!show_two_corners)
+    {
+        gl_view2->clearTextMessages();
+        return;
+    }
+
+    glRoot->setPose(mrpt::poses::CPose3D::FromRotationAndTranslation(
+        theMap.georeferencing.value().T_enu_to_map.mean.getRotationMatrix(),
+        mrpt::math::TVector3D(0, 0, 0)));
+
+    {
+        mrpt::opengl::CCamera& view_cam = gl_view2->getCamera();
+
+        view_cam.setAzimuthDegrees(win->camera().getAzimuthDegrees());
+        view_cam.setElevationDegrees(win->camera().getElevationDegrees());
+        view_cam.setZoomDistance(5);
+    }
+
+    gl_view2->addTextMessage(static_cast<double>(win->width()) * 0.05 - 35, 5, "Map frame", 0, fp);
 }
 
-void rebuildLayerCheckboxes()
+void updateGuiAfterLoadingNewMap()
 {
+    // Build layer checkboxes:
     ASSERT_(panelLayers);
     while (panelLayers->childCount())
     {  //
@@ -260,6 +460,10 @@ void rebuildLayerCheckboxes()
 
         cbLayersByName[layerNames.at(i)] = cb;
     }
+
+    // and point cloud fields:
+    ASSERT_(cmbRecolorizeByField);
+    cmbRecolorizeByField->setItems(knownPointFields);
 }
 
 void rebuildCamTravellingCombo()
@@ -309,25 +513,28 @@ void onKeyboardAction(int key, int modifiers)
         int cmd_elev = 0;
 
         const float dis   = std::max(0.01f, (cam.cameraZoomDistance));
-        float       eye_x = cam.cameraPointingX + dis * cos(DEG2RAD(cam.cameraAzimuthDeg)) *
-                                                cos(DEG2RAD(cam.cameraElevationDeg));
-        float eye_y = cam.cameraPointingY + dis * sin(DEG2RAD(cam.cameraAzimuthDeg)) *
-                                                cos(DEG2RAD(cam.cameraElevationDeg));
-        float eye_z = cam.cameraPointingZ + dis * sin(DEG2RAD(cam.cameraElevationDeg));
+        const auto  eye_x = cam.cameraPointingX + dis * cos(DEG2RAD(cam.cameraAzimuthDeg)) *
+                                                     cos(DEG2RAD(cam.cameraElevationDeg));
+        const auto eye_y = cam.cameraPointingY + dis * sin(DEG2RAD(cam.cameraAzimuthDeg)) *
+                                                     cos(DEG2RAD(cam.cameraElevationDeg));
+        const auto eye_z = cam.cameraPointingZ + dis * sin(DEG2RAD(cam.cameraElevationDeg));
 
         // Orbit camera:
-        float A_AzimuthDeg = -SENSIBILITY_ROTATE * cmd_rot;
+        float A_AzimuthDeg = -SENSIBILITY_ROTATE * static_cast<float>(cmd_rot);
         cam.cameraAzimuthDeg += A_AzimuthDeg;
 
-        float A_ElevationDeg = SENSIBILITY_ROTATE * cmd_elev;
+        float A_ElevationDeg = SENSIBILITY_ROTATE * static_cast<float>(cmd_elev);
         cam.setElevationDeg(cam.cameraElevationDeg + A_ElevationDeg);
 
         // Move cameraPointing pos:
-        cam.cameraPointingX =
-            eye_x - dis * cos(DEG2RAD(cam.cameraAzimuthDeg)) * cos(DEG2RAD(cam.cameraElevationDeg));
-        cam.cameraPointingY =
-            eye_y - dis * sin(DEG2RAD(cam.cameraAzimuthDeg)) * cos(DEG2RAD(cam.cameraElevationDeg));
-        cam.cameraPointingZ = eye_z - dis * sin(DEG2RAD(cam.cameraElevationDeg));
+        cam.cameraPointingX = static_cast<float>(
+            eye_x -
+            dis * cos(DEG2RAD(cam.cameraAzimuthDeg)) * cos(DEG2RAD(cam.cameraElevationDeg)));
+        cam.cameraPointingY = static_cast<float>(
+            eye_y -
+            dis * sin(DEG2RAD(cam.cameraAzimuthDeg)) * cos(DEG2RAD(cam.cameraElevationDeg)));
+        cam.cameraPointingZ =
+            static_cast<float>(eye_z - dis * sin(DEG2RAD(cam.cameraElevationDeg)));
 
         win->camera().setCameraParams(cam);
     };
@@ -392,6 +599,17 @@ void onKeyboardAction(int key, int modifiers)
         }
         break;
 
+        // CTRL+C copies the coordinates
+        case GLFW_KEY_C:
+        {
+            if (btnCopyCoords && (modifiers & GLFW_MOD_CONTROL))
+            {
+                // this seems to need to be done from the nanogui thread.
+                btnCopyCoords->callback()();
+            }
+        }
+        break;
+
         default:  // Do nothing
             break;
     };
@@ -415,8 +633,8 @@ void processCameraTravelling()
     // Time range:
     const double t0 = mrpt::Clock::toDouble(camTravelling.begin()->first);
     const double t1 = mrpt::Clock::toDouble(camTravelling.rbegin()->first);
-    slAnimProgress->setRange(std::make_pair<float>(t0, t1));
-    slAnimProgress->setValue(t);
+    slAnimProgress->setRange(std::make_pair<float>(static_cast<float>(t0), static_cast<float>(t1)));
+    slAnimProgress->setValue(static_cast<float>(t));
 
     if (t >= t1)
     {
@@ -435,10 +653,11 @@ void processCameraTravelling()
     camTravelling.interpolate(mrpt::Clock::fromDouble(t), p, valid);
     if (valid)
     {
-        win->camera().setCameraPointing(p.x, p.y, p.z);
-        win->camera().setAzimuthDegrees(mrpt::RAD2DEG(p.yaw));
-        win->camera().setElevationDegrees(mrpt::RAD2DEG(p.pitch));
-        win->camera().setZoomDistance(p.roll / TRAV_ZOOM2ROLL);
+        const auto pt = p.translation().cast<float>();
+        win->camera().setCameraPointing(pt.x, pt.y, pt.z);
+        win->camera().setAzimuthDegrees(static_cast<float>(mrpt::RAD2DEG(p.yaw)));
+        win->camera().setElevationDegrees(static_cast<float>(mrpt::RAD2DEG(p.pitch)));
+        win->camera().setZoomDistance(static_cast<float>(p.roll / TRAVELING_ZOOM2ROLL));
     }
 
     // Move to next time step:
@@ -502,413 +721,451 @@ void main_show_gui()
     }
 
     // Control GUI sub-window:
+    auto w = win->createManagedSubWindow("Map viewer");
+    w->setPosition({5, 25});
+    w->requestFocus();
+    w->setLayout(
+        new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill, 5, 2));
+    w->setFixedWidth(350);
+
+    for (size_t i = 0; i < lbMapStats.size(); i++)
     {
-        auto w = win->createManagedSubWindow("Map viewer");
-        w->setPosition({5, 25});
-        w->requestFocus();
-        w->setLayout(
-            new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill, 5, 2));
-        w->setFixedWidth(350);
+        auto& lb = lbMapStats[i];
 
-        for (size_t i = 0; i < lbMapStats.size(); i++)
+        if (i == 0)
         {
-            auto& lb = lbMapStats[i];
-
-            if (i == 0)
-            {
-                auto pn = w->add<nanogui::Widget>();
-                pn->setLayout(new nanogui::BoxLayout(
-                    nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
-                lb = pn->add<nanogui::TextBox>("  ");
-                lb->setFixedWidth(300);
-                auto btnLoad = pn->add<nanogui::Button>("", ENTYPO_ICON_ARCHIVE);
-                btnLoad->setCallback(
-                    []()
+            auto pn = w->add<nanogui::Widget>();
+            pn->setLayout(
+                new nanogui::BoxLayout(nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
+            lb = pn->add<nanogui::TextBox>("  ");
+            lb->setFixedWidth(300);
+            auto btnLoad = pn->add<nanogui::Button>("", ENTYPO_ICON_ARCHIVE);
+            btnLoad->setCallback(
+                []()
+                {
+                    try
                     {
-                        try
+                        const auto fil =
+                            nanogui::file_dialog({{"mm", "Metric maps (*.mm)"}}, false);
+                        if (fil.empty())
                         {
-                            const auto fil =
-                                nanogui::file_dialog({{"mm", "Metric maps (*.mm)"}}, false);
-                            if (fil.empty())
-                            {
-                                return;
-                            }
-
-                            loadMapFile(fil);
-                            rebuildLayerCheckboxes();
-                            win->performLayout();
-                            rebuild_3d_view();
+                            return;
                         }
-                        catch (const std::exception& e)
-                        {
-                            std::cerr << e.what() << std::endl;
-                        }
-                    });
-            }
-            else
-            {
-                lb = w->add<nanogui::TextBox>("  ");
-            }
 
-            lb->setFontSize(MID_FONT_SIZE);
-            lb->setAlignment(nanogui::TextBox::Alignment::Left);
-            lb->setEditable(true);
+                        loadMapFile(fil);
+                        updateGuiAfterLoadingNewMap();
+                        win->performLayout();
+                        rebuild_3d_view();
+                    }
+                    catch (const std::exception& e)
+                    {
+                        std::cerr << e.what() << std::endl;
+                    }
+                });
         }
-
-        //
-        w->add<nanogui::Label>(" ");  // separator
-
-        auto tabWidget = w->add<nanogui::TabWidget>();
-
-        auto* tab1 = tabWidget->createTab("View");
-        tab1->setLayout(new nanogui::GroupLayout());
-
-        auto* tab2 = tabWidget->createTab("Maps");
-        tab2->setLayout(
-            new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
-
-        auto* tab3 = tabWidget->createTab("Travelling");
-        tab3->setLayout(
-            new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
-
-        tabWidget->setActiveTab(0);
-
-        // --------------------------------------------------------------
-        // Tab: Map layers
-        // --------------------------------------------------------------
-        tab2->add<nanogui::Label>("Render options:");
-
+        else
         {
-            auto pn = tab2->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            lbPointSize = pn->add<nanogui::Label>("Point size");
-            lbPointSize->setFontSize(MID_FONT_SIZE);
-
-            slPointSize = pn->add<nanogui::Slider>();
-            slPointSize->setRange({1.0f, 10.0f});
-            slPointSize->setValue(2.0f);
-            slPointSize->setCallback([&](float) { rebuild_3d_view(); });
+            lb = w->add<nanogui::TextBox>("  ");
         }
 
-        cbViewVoxelsAsPoints = tab2->add<nanogui::CheckBox>("Render voxel maps as point clouds");
-        cbViewVoxelsAsPoints->setFontSize(MID_FONT_SIZE);
-        cbViewVoxelsAsPoints->setChecked(false);
-        cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
+        lb->setFontSize(MID_FONT_SIZE);
+        lb->setAlignment(nanogui::TextBox::Alignment::Left);
+        lb->setEditable(true);
+    }
 
-        cbViewVoxelsFreeSpace = tab2->add<nanogui::CheckBox>("Render free space of voxel maps");
-        cbViewVoxelsFreeSpace->setFontSize(MID_FONT_SIZE);
-        cbViewVoxelsFreeSpace->setChecked(false);
-        cbViewVoxelsFreeSpace->setCallback([&](bool) { rebuild_3d_view(); });
+    //
+    w->add<nanogui::Label>(" ");  // separator
 
-        cbColorizeMap = tab2->add<nanogui::CheckBox>("Recolorize map points");
+    auto tabWidget = w->add<nanogui::TabWidget>();
+
+    auto* tab1 = tabWidget->createTab("View");
+    tab1->setLayout(new nanogui::GroupLayout());
+
+    auto* tab2 = tabWidget->createTab("Maps");
+    tab2->setLayout(
+        new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
+
+    auto* tab3 = tabWidget->createTab("Travelling");
+    tab3->setLayout(
+        new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
+
+    tabWidget->setActiveTab(0);
+
+    // --------------------------------------------------------------
+    // Tab: Map layers
+    // --------------------------------------------------------------
+    tab2->add<nanogui::Label>("Render options:");
+
+    {
+        auto pn = tab2->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        lbPointSize = pn->add<nanogui::Label>("Point size");
+        lbPointSize->setFontSize(MID_FONT_SIZE);
+
+        slPointSize = pn->add<nanogui::Slider>();
+        slPointSize->setRange({1.0f, 10.0f});
+        slPointSize->setValue(2.0f);
+        slPointSize->setCallback([&](float) { rebuild_3d_view(); });
+    }
+
+    cbViewVoxelsAsPoints = tab2->add<nanogui::CheckBox>("Render voxel maps as point clouds");
+    cbViewVoxelsAsPoints->setFontSize(MID_FONT_SIZE);
+    cbViewVoxelsAsPoints->setChecked(false);
+    cbViewVoxelsAsPoints->setCallback([&](bool) { rebuild_3d_view(); });
+
+    cbViewVoxelsFreeSpace = tab2->add<nanogui::CheckBox>("Render free space of voxel maps");
+    cbViewVoxelsFreeSpace->setFontSize(MID_FONT_SIZE);
+    cbViewVoxelsFreeSpace->setChecked(false);
+    cbViewVoxelsFreeSpace->setCallback([&](bool) { rebuild_3d_view(); });
+
+    {
+        auto pn = tab2->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 4, nanogui::Alignment::Fill));
+
+        cbColorizeMap = pn->add<nanogui::CheckBox>("Recolorize points");
         cbColorizeMap->setFontSize(MID_FONT_SIZE);
         cbColorizeMap->setChecked(true);
         cbColorizeMap->setCallback([&](bool) { rebuild_3d_view(); });
 
-        cbKeepOriginalCloudColors = tab2->add<nanogui::CheckBox>("Keep original cloud colors");
-        cbKeepOriginalCloudColors->setFontSize(MID_FONT_SIZE);
-        cbKeepOriginalCloudColors->setChecked(false);
-        cbKeepOriginalCloudColors->setCallback([&](bool) { rebuild_3d_view(); });
+        auto lb = pn->add<nanogui::Label>("by:");
+        lb->setFontSize(MID_FONT_SIZE);
 
-        {
-            auto pn = tab2->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+        cmbRecolorizeByField = pn->add<nanogui::ComboBox>();
+        cmbRecolorizeByField->setItems({"intensity"});
+        cmbRecolorizeByField->setFontSize(MID_FONT_SIZE);
+        cmbRecolorizeByField->setSelectedIndex(0);
+        cmbRecolorizeByField->setCallback([&](int) { rebuild_3d_view(true); });
 
-            auto lb = pn->add<nanogui::Label>("Intensity-channel:");
-            lb->setFontSize(MID_FONT_SIZE);
-            cmbColorIntensity = pn->add<nanogui::ComboBox>();
-            cmbColorIntensity->setItems(
-                {"cmNONE", "cmHOT", "cmJET", "cmGRAYSCALE"}, {"None", "Hot", "Jet", "Grayscale"});
-            cmbColorIntensity->setFontSize(MID_FONT_SIZE);
-            cmbColorIntensity->setSelectedIndex(2);
-            cmbColorIntensity->setCallback([&](int) { rebuild_3d_view(true); });
-        }
+        cmbColorIntensity = pn->add<nanogui::ComboBox>();
+        cmbColorIntensity->setItems(
+            {"cmNONE", "cmHOT", "cmJET", "cmGRAYSCALE"}, {"None", "Hot", "Jet", "Grayscale"});
+        cmbColorIntensity->setFontSize(MID_FONT_SIZE);
+        cmbColorIntensity->setSelectedIndex(2);
+        cmbColorIntensity->setCallback([&](int) { rebuild_3d_view(true); });
+    }
 
-        tab2->add<nanogui::Label>(" ");
-        {
-            auto pn = tab2->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 4, nanogui::Alignment::Fill));
-            pn->add<nanogui::Label>("Visible layers:");
+    cbKeepNativeCloudColors = tab2->add<nanogui::CheckBox>("Keep native map colors");
+    cbKeepNativeCloudColors->setFontSize(MID_FONT_SIZE);
+    cbKeepNativeCloudColors->setChecked(false);
+    cbKeepNativeCloudColors->setCallback([&](bool) { rebuild_3d_view(); });
 
-            auto* btnCheckAll = pn->add<nanogui::Button>("", ENTYPO_ICON_CHECK);
-            btnCheckAll->setFontSize(SMALL_FONT_SIZE);
-            btnCheckAll->setCallback(
-                []()
-                {
-                    for (auto& [name, cb] : cbLayersByName)
-                    {
-                        cb->setChecked(true);
-                    }
-                    rebuild_3d_view();
-                });
+    tab2->add<nanogui::Label>(" ");
+    {
+        auto pn = tab2->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 4, nanogui::Alignment::Fill));
+        pn->add<nanogui::Label>("Visible layers:");
 
-            auto* btnCheckNone = pn->add<nanogui::Button>("", ENTYPO_ICON_CIRCLE_WITH_CROSS);
-            btnCheckNone->setFontSize(SMALL_FONT_SIZE);
-            btnCheckNone->setCallback(
-                []()
-                {
-                    for (auto& [name, cb] : cbLayersByName)
-                    {
-                        cb->setChecked(false);
-                    }
-                    rebuild_3d_view();
-                });
-        }
-
-        panelLayers = tab2->add<nanogui::Widget>();
-        panelLayers->setLayout(
-            new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
-
-        rebuildLayerCheckboxes();
-
-        {
-            tab2->add<nanogui::Label>(" ");  // separator
-            auto btnSave = tab2->add<nanogui::Button>("Export marked layers...");
-            btnSave->setFontSize(MID_FONT_SIZE);
-            btnSave->setCallback([]() { onSaveLayers(); });
-        }
-
-        // --------------------------------------------------------------
-        // Tab: View
-        // --------------------------------------------------------------
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            lbTrajThick = pn->add<nanogui::Label>("Trajectory thickness:");
-            lbTrajThick->setFontSize(MID_FONT_SIZE);
-
-            slTrajectoryThickness = pn->add<nanogui::Slider>();
-            slTrajectoryThickness->setEnabled(trajectory.size() >= 2);
-            slTrajectoryThickness->setRange({std::log(0.005f), std::log(2.0f)});
-            slTrajectoryThickness->setValue(std::log(0.05f));
-            slTrajectoryThickness->setCallback(
-                [&](float)
-                {
-                    glTrajectory->clear();  // force rebuild
-                    rebuild_3d_view();
-                });
-        }
-
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            lbDepthFieldMid = pn->add<nanogui::Label>("Center depth clip plane:");
-            lbDepthFieldMid->setFontSize(MID_FONT_SIZE);
-
-            slMidDepthField = pn->add<nanogui::Slider>();
-            slMidDepthField->setRange({-2.0, 3.0});
-            slMidDepthField->setValue(1.0f);
-            slMidDepthField->setCallback([&](float) { rebuild_3d_view(); });
-        }
-
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            lbDepthFieldThickness = pn->add<nanogui::Label>("Max-Min depth thickness:");
-            lbDepthFieldThickness->setFontSize(MID_FONT_SIZE);
-
-            slThicknessDepthField = pn->add<nanogui::Slider>();
-            slThicknessDepthField->setRange({-2.0, 6.0});
-            slThicknessDepthField->setValue(3.0);
-            slThicknessDepthField->setCallback([&](float) { rebuild_3d_view(); });
-        }
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            lbCameraFOV = pn->add<nanogui::Label>("Camera FOV:");
-            lbCameraFOV->setFontSize(MID_FONT_SIZE);
-            slCameraFOV = pn->add<nanogui::Slider>();
-            slCameraFOV->setRange({20.0f, 170.0f});
-            slCameraFOV->setValue(90.0f);
-            slCameraFOV->setCallback([&](float) { rebuild_3d_view(); });
-        }
-        lbDepthFieldValues = tab1->add<nanogui::Label>(" ");
-        lbDepthFieldValues->setFontSize(MID_FONT_SIZE);
-
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            cbViewOrtho = pn->add<nanogui::CheckBox>("Orthogonal view");
-            cbViewOrtho->setFontSize(MID_FONT_SIZE);
-            cbViewOrtho->setCallback([&](bool) { rebuild_3d_view(); });
-            cbViewOrtho->setFontSize(MID_FONT_SIZE);
-
-            cbView2D = pn->add<nanogui::CheckBox>("Force 2D view");
-            cbView2D->setFontSize(MID_FONT_SIZE);
-            cbView2D->setCallback([&](bool) { rebuild_3d_view(); });
-        }
-
-        {
-            auto pn = tab1->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            cbShowGroundGrid = pn->add<nanogui::CheckBox>("Show ground grid");
-            cbShowGroundGrid->setFontSize(MID_FONT_SIZE);
-            cbShowGroundGrid->setChecked(true);
-            cbShowGroundGrid->setCallback([&](bool) { rebuild_3d_view(); });
-
-            auto btnFitView = pn->add<nanogui::Button>("Fit view to map");
-            btnFitView->setFontSize(MID_FONT_SIZE);
-            btnFitView->setCallback(
-                [&]()
-                {
-                    doFitView = true;
-                    rebuild_3d_view();
-                });
-        }
-
-        cbApplyGeoRef = tab1->add<nanogui::CheckBox>("Apply georeferenced pose (if available)");
-        cbApplyGeoRef->setFontSize(MID_FONT_SIZE);
-        cbApplyGeoRef->setCallback([&](bool) { rebuild_3d_view(); });
-
-        // --------------------------------------------------------------
-        // Tab: Travelling
-        // --------------------------------------------------------------
-        tab3->add<nanogui::Label>("Define camera travelling paths");
-
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            auto lb = pn->add<nanogui::Label>("Keyframes:");
-            lb->setFontSize(MID_FONT_SIZE);
-
-            cbTravellingKeys = tab3->add<nanogui::ComboBox>();
-            cbTravellingKeys->setFontSize(MID_FONT_SIZE);
-        }
-        rebuildCamTravellingCombo();
-
-        tab3->add<nanogui::Label>("");
-
-        nanogui::TextBox* edTime;
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
-
-            pn->add<nanogui::Label>("New keyframe:")->setFontSize(MID_FONT_SIZE);
-
-            edTime = pn->add<nanogui::TextBox>();
-            edTime->setAlignment(nanogui::TextBox::Alignment::Left);
-            edTime->setValue("0.0");
-            edTime->setEditable(true);
-            edTime->setPlaceholder("Time for this keyframe [s]");
-            edTime->setFormat("[0-9\\.]*");
-            edTime->setFontSize(MID_FONT_SIZE);
-
-            auto btnAdd = pn->add<nanogui::Button>("Add", ENTYPO_ICON_ADD_TO_LIST);
-            btnAdd->setFontSize(MID_FONT_SIZE);
-            btnAdd->setCallback(
-                [edTime]()
-                {
-                    const auto p = mrpt::math::TPose3D(
-                        win->camera().cameraParams().cameraPointingX,
-                        win->camera().cameraParams().cameraPointingY,
-                        win->camera().cameraParams().cameraPointingZ,
-                        mrpt::DEG2RAD(win->camera().cameraParams().cameraAzimuthDeg),
-                        mrpt::DEG2RAD(win->camera().cameraParams().cameraElevationDeg),
-                        win->camera().cameraParams().cameraZoomDistance * TRAV_ZOOM2ROLL);
-                    camTravelling.insert(mrpt::Clock::fromDouble(std::stod(edTime->value())), p);
-                    rebuildCamTravellingCombo();
-
-                    edTime->setValue(std::to_string(std::stod(edTime->value()) + 1));
-                });
-        }
-
-        tab3->add<nanogui::Label>("");
-
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
-
-            pn->add<nanogui::Label>("Playback:");
-            btnAnimate = pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_PLAY);
-            btnAnimate->setFontSize(MID_FONT_SIZE);
-            btnAnimate->setCallback(
-                []()
-                {
-                    if (camTravelling.empty())
-                    {
-                        return;
-                    }
-                    camTravellingCurrentTime.emplace(
-                        mrpt::Clock::toDouble(camTravelling.begin()->first));
-                    btnAnimate->setEnabled(false);
-                    btnAnimStop->setEnabled(true);
-                });
-            btnAnimStop = pn->add<nanogui::Button>("", ENTYPO_ICON_CIRCLE_WITH_CROSS);
-            btnAnimStop->setFontSize(MID_FONT_SIZE);
-            btnAnimStop->setEnabled(false);
-            btnAnimStop->setCallback([]() { camTravellingStop(); });
-        }
-
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            auto lb = pn->add<nanogui::Label>("Animation FPS:");
-            lb->setFontSize(MID_FONT_SIZE);
-
-            edAnimFPS = pn->add<nanogui::TextBox>("30.0");
-            edAnimFPS->setFontSize(MID_FONT_SIZE);
-            edAnimFPS->setFormat("[0-9\\.]*");
-            edAnimFPS->setEditable(true);
-        }
-        {
-            auto pn = tab3->add<nanogui::Widget>();
-            pn->setLayout(new nanogui::GridLayout(
-                nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
-
-            auto lb = pn->add<nanogui::Label>("Interpolation:");
-            lb->setFontSize(MID_FONT_SIZE);
-
-            cbTravellingInterp = pn->add<nanogui::ComboBox>();
-            cbTravellingInterp->setFontSize(MID_FONT_SIZE);
-            cbTravellingInterp->setItems({"Linear", "Spline"});
-            cbTravellingInterp->setSelectedIndex(0);
-        }
-
-        slAnimProgress = tab3->add<nanogui::Slider>();
-        slAnimProgress->setEnabled(false);
-
-        // ---
-        lbMousePos = w->add<nanogui::Label>("Mouse pointing to:");
-        lbMousePos->setFontSize(MID_FONT_SIZE);
-        lbCameraPointing = w->add<nanogui::Label>("Camera looking at:");
-        lbCameraPointing->setFontSize(MID_FONT_SIZE);
-
-        w->add<nanogui::Button>("Quit", ENTYPO_ICON_ARROW_BOLD_LEFT)
-            ->setCallback([]() { win->setVisible(false); });
-
-        win->setKeyboardCallback(
-            [&](int key, [[maybe_unused]] int scancode, int action, int modifiers)
+        auto* btnCheckAll = pn->add<nanogui::Button>("", ENTYPO_ICON_CHECK);
+        btnCheckAll->setFontSize(SMALL_FONT_SIZE);
+        btnCheckAll->setCallback(
+            []()
             {
-                if (action != GLFW_PRESS && action != GLFW_REPEAT)
+                for (auto& [name, cb] : cbLayersByName)
                 {
-                    return false;
+                    cb->setChecked(true);
                 }
-                onKeyboardAction(key, modifiers);
-                return false;
+                rebuild_3d_view();
+            });
+
+        auto* btnCheckNone = pn->add<nanogui::Button>("", ENTYPO_ICON_CIRCLE_WITH_CROSS);
+        btnCheckNone->setFontSize(SMALL_FONT_SIZE);
+        btnCheckNone->setCallback(
+            []()
+            {
+                for (auto& [name, cb] : cbLayersByName)
+                {
+                    cb->setChecked(false);
+                }
+                rebuild_3d_view();
             });
     }
+
+    panelLayers = tab2->add<nanogui::Widget>();
+    panelLayers->setLayout(
+        new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill));
+
+    {
+        tab2->add<nanogui::Label>(" ");  // separator
+        auto btnSave = tab2->add<nanogui::Button>("Export marked layers...");
+        btnSave->setFontSize(MID_FONT_SIZE);
+        btnSave->setCallback([]() { onSaveLayers(); });
+    }
+
+    // --------------------------------------------------------------
+    // Tab: View
+    // --------------------------------------------------------------
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        lbTrajectoryThick = pn->add<nanogui::Label>("Trajectory thickness:");
+        lbTrajectoryThick->setFontSize(MID_FONT_SIZE);
+
+        slTrajectoryThickness = pn->add<nanogui::Slider>();
+        slTrajectoryThickness->setEnabled(trajectory.size() >= 2);
+        slTrajectoryThickness->setRange({std::log(0.005f), std::log(2.0f)});
+        slTrajectoryThickness->setValue(std::log(0.05f));
+        slTrajectoryThickness->setCallback(
+            [&](float)
+            {
+                glTrajectory->clear();  // force rebuild
+                rebuild_3d_view();
+            });
+    }
+
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        lbDepthFieldMid = pn->add<nanogui::Label>("Center depth clip plane:");
+        lbDepthFieldMid->setFontSize(MID_FONT_SIZE);
+
+        slMidDepthField = pn->add<nanogui::Slider>();
+        slMidDepthField->setRange({-2.0, 3.0});
+        slMidDepthField->setValue(1.0f);
+        slMidDepthField->setCallback([&](float) { rebuild_3d_view(); });
+    }
+
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        lbDepthFieldThickness = pn->add<nanogui::Label>("Max-Min depth thickness:");
+        lbDepthFieldThickness->setFontSize(MID_FONT_SIZE);
+
+        slThicknessDepthField = pn->add<nanogui::Slider>();
+        slThicknessDepthField->setRange({-2.0, 6.0});
+        slThicknessDepthField->setValue(3.0);
+        slThicknessDepthField->setCallback([&](float) { rebuild_3d_view(); });
+    }
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        lbCameraFOV = pn->add<nanogui::Label>("Camera FOV:");
+        lbCameraFOV->setFontSize(MID_FONT_SIZE);
+        slCameraFOV = pn->add<nanogui::Slider>();
+        slCameraFOV->setRange({20.0f, 170.0f});
+        slCameraFOV->setValue(90.0f);
+        slCameraFOV->setCallback([&](float) { rebuild_3d_view(); });
+    }
+    lbDepthFieldValues = tab1->add<nanogui::Label>(" ");
+    lbDepthFieldValues->setFontSize(MID_FONT_SIZE);
+
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        cbViewOrtho = pn->add<nanogui::CheckBox>("Orthogonal view");
+        cbViewOrtho->setFontSize(MID_FONT_SIZE);
+        cbViewOrtho->setCallback([&](bool) { rebuild_3d_view(); });
+        cbViewOrtho->setFontSize(MID_FONT_SIZE);
+
+        cbView2D = pn->add<nanogui::CheckBox>("Force 2D view");
+        cbView2D->setFontSize(MID_FONT_SIZE);
+        cbView2D->setCallback([&](bool) { rebuild_3d_view(); });
+    }
+
+    {
+        auto pn = tab1->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        cbShowGroundGrid = pn->add<nanogui::CheckBox>("Show ground grid");
+        cbShowGroundGrid->setFontSize(MID_FONT_SIZE);
+        cbShowGroundGrid->setChecked(true);
+        cbShowGroundGrid->setCallback([&](bool) { rebuild_3d_view(); });
+
+        auto btnFitView = pn->add<nanogui::Button>("Fit view to map");
+        btnFitView->setFontSize(MID_FONT_SIZE);
+        btnFitView->setCallback(
+            [&]()
+            {
+                doFitView = true;
+                rebuild_3d_view();
+            });
+    }
+
+    cbApplyGeoRef = tab1->add<nanogui::CheckBox>("Apply georeferenced pose (if available)");
+    cbApplyGeoRef->setFontSize(MID_FONT_SIZE);
+    cbApplyGeoRef->setCallback([&](bool) { rebuild_3d_view(); });
+
+    // --------------------------------------------------------------
+    // Tab: Travelling
+    // --------------------------------------------------------------
+    tab3->add<nanogui::Label>("Define camera travelling paths");
+
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        auto lb = pn->add<nanogui::Label>("Keyframes:");
+        lb->setFontSize(MID_FONT_SIZE);
+
+        cbTravellingKeys = tab3->add<nanogui::ComboBox>();
+        cbTravellingKeys->setFontSize(MID_FONT_SIZE);
+    }
+    rebuildCamTravellingCombo();
+
+    tab3->add<nanogui::Label>("");
+
+    nanogui::TextBox* edTime;
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
+        pn->add<nanogui::Label>("New keyframe:")->setFontSize(MID_FONT_SIZE);
+
+        edTime = pn->add<nanogui::TextBox>();
+        edTime->setAlignment(nanogui::TextBox::Alignment::Left);
+        edTime->setValue("0.0");
+        edTime->setEditable(true);
+        edTime->setPlaceholder("Time for this keyframe [s]");
+        edTime->setFormat("[0-9\\.]*");
+        edTime->setFontSize(MID_FONT_SIZE);
+
+        auto btnAdd = pn->add<nanogui::Button>("Add", ENTYPO_ICON_ADD_TO_LIST);
+        btnAdd->setFontSize(MID_FONT_SIZE);
+        btnAdd->setCallback(
+            [edTime]()
+            {
+                const auto p = mrpt::math::TPose3D(
+                    win->camera().cameraParams().cameraPointingX,
+                    win->camera().cameraParams().cameraPointingY,
+                    win->camera().cameraParams().cameraPointingZ,
+                    mrpt::DEG2RAD(win->camera().cameraParams().cameraAzimuthDeg),
+                    mrpt::DEG2RAD(win->camera().cameraParams().cameraElevationDeg),
+                    win->camera().cameraParams().cameraZoomDistance * TRAVELING_ZOOM2ROLL);
+                camTravelling.insert(mrpt::Clock::fromDouble(std::stod(edTime->value())), p);
+                rebuildCamTravellingCombo();
+
+                edTime->setValue(std::to_string(std::stod(edTime->value()) + 1));
+            });
+    }
+
+    tab3->add<nanogui::Label>("");
+
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
+        pn->add<nanogui::Label>("Playback:");
+        btnAnimate = pn->add<nanogui::Button>("", ENTYPO_ICON_CONTROLLER_PLAY);
+        btnAnimate->setFontSize(MID_FONT_SIZE);
+        btnAnimate->setCallback(
+            []()
+            {
+                if (camTravelling.empty())
+                {
+                    return;
+                }
+                camTravellingCurrentTime.emplace(
+                    mrpt::Clock::toDouble(camTravelling.begin()->first));
+                btnAnimate->setEnabled(false);
+                btnAnimStop->setEnabled(true);
+            });
+        btnAnimStop = pn->add<nanogui::Button>("", ENTYPO_ICON_CIRCLE_WITH_CROSS);
+        btnAnimStop->setFontSize(MID_FONT_SIZE);
+        btnAnimStop->setEnabled(false);
+        btnAnimStop->setCallback([]() { camTravellingStop(); });
+    }
+
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        auto lb = pn->add<nanogui::Label>("Animation FPS:");
+        lb->setFontSize(MID_FONT_SIZE);
+
+        edAnimFPS = pn->add<nanogui::TextBox>("30.0");
+        edAnimFPS->setFontSize(MID_FONT_SIZE);
+        edAnimFPS->setFormat("[0-9\\.]*");
+        edAnimFPS->setEditable(true);
+    }
+    {
+        auto pn = tab3->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 2, nanogui::Alignment::Fill));
+
+        auto lb = pn->add<nanogui::Label>("Interpolation:");
+        lb->setFontSize(MID_FONT_SIZE);
+
+        cbTravellingInterp = pn->add<nanogui::ComboBox>();
+        cbTravellingInterp->setFontSize(MID_FONT_SIZE);
+        cbTravellingInterp->setItems({"Linear", "Spline"});
+        cbTravellingInterp->setSelectedIndex(0);
+    }
+    slAnimProgress = tab3->add<nanogui::Slider>();
+    slAnimProgress->setEnabled(false);
+
+    // ---
+
+    {
+        auto pn = w->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::BoxLayout(nanogui::Orientation::Horizontal, nanogui::Alignment::Fill));
+
+        auto pnLeft = pn->add<nanogui::Widget>();
+        pnLeft->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Vertical, 2, nanogui::Alignment::Middle));
+
+        auto pnRight = pn->add<nanogui::Widget>();
+        pnRight->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Vertical, 2, nanogui::Alignment::Fill));
+
+        lbMousePos = pnLeft->add<nanogui::Label>("Mouse pointing to:");
+        lbMousePos->setFontSize(SMALL_FONT_SIZE);
+        lbMousePos->setFixedWidth(280);
+        lbCameraPointing = pnLeft->add<nanogui::Label>("Camera looking at:");
+        lbCameraPointing->setFontSize(SMALL_FONT_SIZE);
+        lbCameraPointing->setFixedWidth(280);
+
+        cbMouseUnits =
+            pnRight->add<nanogui::ComboBox>(std::vector<std::string>({"map", "ENU", "lat/lon "}));
+        cbMouseUnits->setTooltip("Reference frame and format of coordinates");
+        cbMouseUnits->setFontSize(SMALL_FONT_SIZE);
+        cbMouseUnits->setFixedHeight(30);
+
+        btnCopyCoords = pnRight->add<nanogui::Button>("", ENTYPO_ICON_COPY);
+        btnCopyCoords->setTooltip("Copy coordinates to clipboard (CTRL+C)");
+        btnCopyCoords->setCallback(
+            [&]()
+            {
+                glfwSetClipboardString(
+                    win->glfwWindow(),
+                    (lbMousePos->caption() + std::string("\n") + lbCameraPointing->caption())
+                        .c_str());
+            });
+    }
+
+    w->add<nanogui::Button>("Quit", ENTYPO_ICON_ARROW_BOLD_LEFT)
+        ->setCallback([]() { win->setVisible(false); });
+
+    win->setKeyboardCallback(
+        [&](int key, [[maybe_unused]] int scancode, int action, int modifiers)
+        {
+            if (action != GLFW_PRESS && action != GLFW_REPEAT)
+            {
+                return false;
+            }
+            onKeyboardAction(key, modifiers);
+            return false;
+        });
+
+    updateGuiAfterLoadingNewMap();
 
     // --------------------------------------------------------------
     // ^^^^^^^^ GUI definition done ^^^^^^^^
@@ -921,10 +1178,10 @@ void main_show_gui()
 
     // save and load UI state:
 #define LOAD_CB_STATE(CB_NAME__) do_cb(CB_NAME__, #CB_NAME__)
-#define SAVE_CB_STATE(CB_NAME__) appCfg.write("", #CB_NAME__, CB_NAME__->checked())
+#define SAVE_CB_STATE(CB_NAME__) appCfg.write("", #CB_NAME__, (CB_NAME__)->checked())
 
 #define LOAD_SL_STATE(SL_NAME__) do_sl(SL_NAME__, #SL_NAME__)
-#define SAVE_SL_STATE(SL_NAME__) appCfg.write("", #SL_NAME__, SL_NAME__->value())
+#define SAVE_SL_STATE(SL_NAME__) appCfg.write("", #SL_NAME__, (SL_NAME__)->value())
 
     auto load_UI_state_from_user_config = [&]()
     {
@@ -939,7 +1196,7 @@ void main_show_gui()
         LOAD_CB_STATE(cbViewVoxelsAsPoints);
         LOAD_CB_STATE(cbViewVoxelsFreeSpace);
         LOAD_CB_STATE(cbColorizeMap);
-        LOAD_CB_STATE(cbKeepOriginalCloudColors);
+        LOAD_CB_STATE(cbKeepNativeCloudColors);
         LOAD_CB_STATE(cbShowGroundGrid);
 
         LOAD_SL_STATE(slPointSize);
@@ -967,7 +1224,7 @@ void main_show_gui()
         SAVE_CB_STATE(cbViewVoxelsAsPoints);
         SAVE_CB_STATE(cbViewVoxelsFreeSpace);
         SAVE_CB_STATE(cbColorizeMap);
-        SAVE_CB_STATE(cbKeepOriginalCloudColors);
+        SAVE_CB_STATE(cbKeepNativeCloudColors);
         SAVE_CB_STATE(cbShowGroundGrid);
 
         SAVE_SL_STATE(slPointSize);
@@ -1011,60 +1268,6 @@ void main_show_gui()
 
     // save UI state:
     save_UI_state_to_user_config();
-}
-
-void doColorizeByIntensity(
-    const mrpt::img::TColormap& colormap, const mrpt::maps::CPointsMap* org_cloud,
-    mrpt::opengl::CPointCloudColoured& cloud)
-{
-    if (colormap == mrpt::img::TColormap::cmNONE)
-    {
-        return;
-    }
-
-    // Colorize by intensity with custom color map?
-#if MRPT_VERSION >= 0x020f00  // 2.15.0
-    if (!org_cloud || !org_cloud->hasPointField("intensity"))
-#else
-    if (!org_cloud || !org_cloud->hasField_Intensity())
-#endif
-    {
-        return;
-    }
-
-#if MRPT_VERSION >= 0x020f00  // 2.15.0
-    const auto* Is = org_cloud->getPointsBufferRef_float_field("intensity");
-#else
-    const auto* Is = org_cloud->getPointsBufferRef_intensity();
-#endif
-    ASSERT_(Is);
-
-    // Thread-local cache for max intensity
-    thread_local float max_intensity_cache = 1.0f;
-
-    // Find max intensity in current cloud
-    float current_max = 0.0f;
-    for (const auto& I : *Is)
-    {
-        if (I > current_max)
-        {
-            current_max = I;
-        }
-    }
-
-    // Smooth update of max intensity
-    max_intensity_cache = 0.9f * max_intensity_cache + 0.1f * current_max;
-    const float scale   = (max_intensity_cache > 0.0f) ? (1.0f / max_intensity_cache) : 1.0f;
-
-    for (size_t i = 0; i < Is->size(); i++)
-    {
-        const float I_norm = (*Is)[i] * scale;  // normalize to [0,1] using smoothed max
-        float       r = 0, g = 0, b = 0;
-        mrpt::img::colormap(colormap, I_norm, r, g, b);
-        cloud.setPointColor_fast(i, r, g, b);
-    }
-
-    cloud.markAllPointsAsNew();
 }
 
 }  // namespace
@@ -1136,9 +1339,11 @@ void rebuild_3d_view(bool force_rebuild_view)
             auto& cm    = rpL.colorMode.emplace();
             cm.colorMap = mrpt::typemeta::str2enum<mrpt::img::TColormap>(
                 cmbColorIntensity->items().at(cmbColorIntensity->selectedIndex()));
-            cm.recolorizeByCoordinate = mp2p_icp::Coordinate::Z;
+
+            cm.recolorizeByField =
+                cmbRecolorizeByField->items().at(cmbRecolorizeByField->selectedIndex());
         }
-        if (cbKeepOriginalCloudColors->checked())
+        if (cbKeepNativeCloudColors->checked())
         {
             auto& cm                     = rpL.colorMode.emplace();
             cm.keep_original_cloud_color = true;
@@ -1165,20 +1370,6 @@ void rebuild_3d_view(bool force_rebuild_view)
         // Show all or selected layers:
         rpMap.points.allLayers.color = mrpt::img::TColor(0xff, 0x00, 0x00, 0xff);
 
-        // Re-colorize using a colormap for intensity.
-        mrpt::img::TColormap recolorizeIntensity = mrpt::typemeta::str2enum<mrpt::img::TColormap>(
-            cmbColorIntensity->items().at(cmbColorIntensity->selectedIndex()));
-        if (theMap.layers.size() == 1)
-        {
-            auto org_cloud =
-                std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(theMap.layers.begin()->second);
-            if (auto cloud = glPts->getByClass<mrpt::opengl::CPointCloudColoured>(0);
-                cloud && org_cloud)
-            {
-                doColorizeByIntensity(recolorizeIntensity, org_cloud.get(), *cloud);
-            }
-        }
-
         glVizMap->insert(glPts);
         glVizMap->insert(glMapCorner);
         glVizMap->insert(glTrajectory);
@@ -1201,6 +1392,11 @@ void rebuild_3d_view(bool force_rebuild_view)
     if (mapBbox)
     {
         glGrid->setPlaneLimits(mapBbox->min.x, mapBbox->max.x, mapBbox->min.y, mapBbox->max.y);
+
+        constexpr float MAX_GRID_LINES = 20.0f;
+
+        const auto bboxDiagonal = (mapBbox->max - mapBbox->min).cast<float>().norm();
+        glGrid->setGridFrequency(std::max<float>(1.0f, std::round(bboxDiagonal / MAX_GRID_LINES)));
     }
     glGrid->setVisibility(cbShowGroundGrid->checked());
 
@@ -1218,8 +1414,9 @@ void rebuild_3d_view(bool force_rebuild_view)
     // glTrajectory:
     if (glTrajectory->empty() && trajectory.size() >= 2)
     {
-        const float trajCylRadius = std::exp(slTrajectoryThickness->value());
-        lbTrajThick->setCaption("Traj. thickness: " + std::to_string(trajCylRadius));
+        const float trajectoryCylRadius = std::exp(slTrajectoryThickness->value());
+        lbTrajectoryThick->setCaption(
+            "Trajectory thickness: " + std::to_string(trajectoryCylRadius));
 
         std::optional<mrpt::math::TPose3D> prevPose;
         for (const auto& [t, p] : trajectory)
@@ -1231,8 +1428,8 @@ void rebuild_3d_view(bool force_rebuild_view)
                 auto glSegment = mrpt::opengl::CArrow::Create();
                 glSegment->setArrowEnds(p0.translation(), p.translation());
                 glSegment->setHeadRatio(.0);
-                glSegment->setLargeRadius(trajCylRadius);
-                glSegment->setSmallRadius(trajCylRadius);
+                glSegment->setLargeRadius(trajectoryCylRadius);
+                glSegment->setSmallRadius(trajectoryCylRadius);
                 glSegment->setColor_u8(0x30, 0x30, 0x30, 0xff);
 
                 glTrajectory->insert(glSegment);
@@ -1241,9 +1438,10 @@ void rebuild_3d_view(bool force_rebuild_view)
         }
     }
 
-    // XYZ corner overlay viewport:
+    // XYZ corner overlay viewports: one for "Map", another for "ENU"
+    if (!win->background_scene->getViewport(FIRST_MINI_VIEW_NAME))
     {
-        auto gl_view = win->background_scene->createViewport("small-view");
+        auto gl_view = win->background_scene->createViewport(FIRST_MINI_VIEW_NAME);
 
         gl_view->setViewportPosition(0, 0, 0.1, 0.1 * 16.0 / 9.0);
         gl_view->setTransparent(true);
@@ -1263,6 +1461,33 @@ void rebuild_3d_view(bool force_rebuild_view)
             gl_view->insert(obj);
         }
         gl_view->insert(mrpt::opengl::stock_objects::CornerXYZ());
+    }
+    if (!win->background_scene->getViewport(SECOND_MINI_VIEW_NAME))
+    {
+        auto gl_view = win->background_scene->createViewport(SECOND_MINI_VIEW_NAME);
+
+        gl_view->setViewportPosition(0.1, 0, 0.1, 0.1 * 16.0 / 9.0);
+        gl_view->setTransparent(true);
+
+        auto glRoot = mrpt::opengl::CSetOfObjects::Create();
+        gl_view->insert(glRoot);
+
+        {
+            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("X");
+            obj->setLocation(1.1, 0, 0);
+            glRoot->insert(obj);
+        }
+        {
+            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Y");
+            obj->setLocation(0, 1.1, 0);
+            glRoot->insert(obj);
+        }
+        {
+            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Z");
+            obj->setLocation(0, 0, 1.1);
+            glRoot->insert(obj);
+        }
+        glRoot->insert(mrpt::opengl::stock_objects::CornerXYZ());
     }
 
     // Global view options:
