@@ -47,9 +47,6 @@ class FilterMLS : public mp2p_icp_filters::FilterBase
    public:
     FilterMLS();
 
-    // See docs in base class.
-    void initialize_filter(const mrpt::containers::yaml& c) override;
-
     // See docs in FilterBase
     void filter(mp2p_icp::metric_map_t& inOut) const override;
 
@@ -80,6 +77,10 @@ class FilterMLS : public mp2p_icp_filters::FilterBase
         std::string input_pointcloud_layer = mp2p_icp::metric_map_t::PT_LAYER_RAW;
 
         std::string output_pointcloud_layer = "mls";
+
+        /** The class name for output layer if it does not exist and needs to be
+         * created. Empty means same class than input. */
+        std::string output_layer_class = "";
 
         /** (Optional) If `upsampling_method` is `DISTINCT_CLOUD`,
          * this layer's points will be projected onto the MLS surface
@@ -113,6 +114,10 @@ class FilterMLS : public mp2p_icp_filters::FilterBase
 
     /** Algorithm parameters */
     Parameters params;
+
+   protected:
+    // See docs in base class.
+    void initialize_filter(const mrpt::containers::yaml& c) override;
 
    private:
     /** Hidden implementation details (e.g., Eigen types)
