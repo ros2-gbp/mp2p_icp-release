@@ -366,6 +366,12 @@ void correctPointsLoop(const CorrectPointsArguments& args)
                     (*dst)[n0 + i] = (*src)[i];
                 }
 #endif
+#if MRPT_VERSION >= 0x020f03  // >=2.15.3
+                for (auto& [src, dst] : ctxCopyPointFields->uint8_fields)
+                {
+                    (*dst)[n0 + i] = (*src)[i];
+                }
+#endif
                 for (auto& [src, dst] : ctxCopyPointFields->float_fields)
                 {
                     (*dst)[n0 + i] = (*src)[i];
@@ -444,6 +450,10 @@ void FilterDeskew::filter(mp2p_icp::metric_map_t& inOut) const
     std::optional<mrpt::maps::CPointsMap::InsertCtx> insert_ctx;
     if (outPc)
     {
+        // Copy all point fields from the source:
+        outPc->registerPointFieldsFrom(*inPc);
+
+        // and then, prepare structures for fast copying:
         insert_ctx = outPc->prepareForInsertPointsFrom(*inPc);
     }
 
