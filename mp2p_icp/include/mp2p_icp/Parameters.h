@@ -7,7 +7,7 @@
  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
  and map building tools. mp2p_icp is part of MOLA.
 
- Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+ Copyright (C) 2018-2026 Jose Luis Blanco, University of Almeria,
                          and individual contributors.
  SPDX-License-Identifier: BSD-3-Clause
 */
@@ -84,8 +84,7 @@ struct Parameters : public mrpt::serialization::CSerializable
 
     /** Generated files format, if generateDebugFiles is true. */
     std::string debugFileNameFormat =
-        "icp-run-$UNIQUE_ID-local-$LOCAL_ID$LOCAL_LABEL-"
-        "global-$GLOBAL_ID$GLOBAL_LABEL.icplog";
+        "icp-run-$UNIQUE_ID-local-$LOCAL_ID$LOCAL_LABEL-global-$GLOBAL_ID$GLOBAL_LABEL.icplog";
 
     /** Function to apply to the local and global maps before saving the map to
      * a log file. Useful to apply deletion filters to save space and time.

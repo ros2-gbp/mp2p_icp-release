@@ -7,7 +7,7 @@
  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
  and map building tools. mp2p_icp is part of MOLA.
 
- Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+ Copyright (C) 2018-2026 Jose Luis Blanco, University of Almeria,
                          and individual contributors.
  SPDX-License-Identifier: BSD-3-Clause
 */
@@ -55,10 +55,16 @@ std::tuple<mp2p_icp::ICP::Ptr, mp2p_icp::Parameters> mp2p_icp::icp_pipeline_from
     }
 
     // ICP solver class:
-    if (icpParams.has("solvers")) icp->initialize_solvers(icpParams["solvers"]);
+    if (icpParams.has("solvers"))
+    {
+        icp->initialize_solvers(icpParams["solvers"]);
+    }
 
     // ICP matchers class:
-    if (icpParams.has("matchers")) icp->initialize_matchers(icpParams["matchers"]);
+    if (icpParams.has("matchers"))
+    {
+        icp->initialize_matchers(icpParams["matchers"]);
+    }
 
     // ICP quality class:
     ASSERT_(icpParams.has("quality"));
