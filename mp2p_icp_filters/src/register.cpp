@@ -7,7 +7,7 @@
  A repertory of multi primitive-to-primitive (MP2P) ICP algorithms
  and map building tools. mp2p_icp is part of MOLA.
 
- Copyright (C) 2018-2025 Jose Luis Blanco, University of Almeria,
+ Copyright (C) 2018-2026 Jose Luis Blanco, University of Almeria,
                          and individual contributors.
  SPDX-License-Identifier: BSD-3-Clause
 */
@@ -23,6 +23,7 @@
  *
  */
 
+#include <mp2p_icp_filters/FilterAbsoluteTimestamp.h>
 #include <mp2p_icp_filters/FilterAdjustTimestamps.h>
 #include <mp2p_icp_filters/FilterBoundingBox.h>
 #include <mp2p_icp_filters/FilterByExpression.h>
@@ -58,6 +59,7 @@ MRPT_INITIALIZER(register_mola_lidar_segmentation)
     registerClass(CLASS_ID(mp2p_icp_filters::GeneratorEdgesFromCurvature));
 
     // Filters:
+    registerClass(CLASS_ID(mp2p_icp_filters::FilterAbsoluteTimestamp));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterAdjustTimestamps));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBase));
     registerClass(CLASS_ID(mp2p_icp_filters::FilterBoundingBox));
