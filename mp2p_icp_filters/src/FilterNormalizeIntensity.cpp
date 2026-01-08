@@ -62,20 +62,21 @@ void FilterNormalizeIntensity::filter(mp2p_icp::metric_map_t& inOut) const
 
     auto& pc = *pcPtr;
 
-#if MRPT_VERSION >= 0x020f00  // 2.15.0
-    auto* IsPtr = pc.getPointsBufferRef_float_field("intensity");
-#else
-    auto* IsPtr = pc.getPointsBufferRef_intensity();
-#endif
+    auto* IsPtr = pc.getPointsBufferRef_float_field(POINT_FIELD_INTENSITY);
 
     ASSERTMSG_(
-        IsPtr != nullptr && !IsPtr->empty(),
+        IsPtr != nullptr,
         mrpt::format(
-            "Input point cloud layer '%s' (%s) seems not to have an intensity "
-            "channel or it is empty.",
+            "Input point cloud layer '%s' (%s) seems not to have an intensity channel",
             params.pointcloud_layer.c_str(), pc.GetRuntimeClass()->className));
 
     auto& Is = *IsPtr;
+
+    if (Is.empty())
+    {
+        MRPT_LOG_DEBUG("Intensity channel exists but it's empty, doing nothing.");
+        return;
+    }
 
     std::optional<float> minI, maxI;
 
