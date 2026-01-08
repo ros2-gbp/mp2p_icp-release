@@ -78,6 +78,7 @@ void mp2p_icp_filters::simplemap_to_metricmap(
     // Parameters for twist, and possibly other user-provided variables.
     mp2p_icp::ParameterSource ps;
     mp2p_icp::AttachToParameterSource(filters, ps);
+    mp2p_icp::AttachToParameterSource(finalFilters, ps);
     mp2p_icp::AttachToParameterSource(generators, ps);
 
     // Default values for twist variables:
@@ -255,7 +256,7 @@ void mp2p_icp_filters::simplemap_to_metricmap(
             std::cout << "Applying 'final_filters'..." << std::endl;
         }
 
-        mp2p_icp_filters::apply_filter_pipeline(finalFilters, mm);
+        mp2p_icp_filters::apply_filter_pipeline(finalFilters, mm, options.profiler);
 
         if (options.verbosity <= mrpt::system::LVL_INFO)
         {
