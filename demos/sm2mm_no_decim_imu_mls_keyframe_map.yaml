@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------------------------
 # Pipeline definition file for sm2mm (simplemap-to-metricmap)
 #
-# See: https://github.com/MOLAorg/mp2p_icp/tree/master/apps/sm2mm
+# See: https://github.com/MOLAorg/mp2p_icp/tree/develop/apps/sm2mm
 #
 # Explanation of this particular pipeline:
 #  - Generators: Default generator creating 'raw', another just creating
@@ -94,12 +94,6 @@ filters:
 # 3) Final, overall filter pipeline to apply to the whole metric map
 # -------------------------------------------------------------------
 final_filters:
-  - class_name: mp2p_icp_filters::FilterNormalizeIntensity
-    params:
-      pointcloud_layer: "filtered"
-      #remember_intensity_range: true
-      #fixed_maximum_intensity: 2000.0
-
   # ----------------------------------------------------------------------
   # Configuration for the Moving Least Squares (MLS) Filter
   # ----------------------------------------------------------------------
