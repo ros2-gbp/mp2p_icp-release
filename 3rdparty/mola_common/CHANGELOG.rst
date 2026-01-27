@@ -2,6 +2,11 @@
 Changelog for package mola_common
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.5.2 (2025-10-21)
+------------------
+* Removed leftover inclusion of old mola-version.cmake file
+* Contributors: Jose Luis Blanco-Claraco
+
 0.5.1 (2025-09-12)
 ------------------
 * Fix issue: cmake scripts attempt to read package.xml of the caller even if not defining a module
