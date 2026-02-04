@@ -29,15 +29,23 @@ CLI Reference
 
 .. code-block:: bash
 
-    USAGE: 
+    USAGE:
 
-    sm2mm  [--to-index <0>] [--from-index <0>] [--profiler]
-            [--no-progress-bar] [--externals-dir <<ExternalsDirectory>>] [-v
-            <INFO>] [-p <pipeline.yaml>] [-l <foobar.so>] -o <out.mm> -i
-            <map.simplemap> [--] [--version] [-h]
+    sm2mm  [--decimate-max <N>] [--decimate-nth <N>] [--to-index <0>]
+            [--from-index <0>] [--permit-missing-externals] [--profiler]
+            [--no-progress-bar] [--externals-dir <<ExternalsDirectory>>]
+            [--compression-method <METHOD>] [-v <INFO>] [-p <pipeline.yaml>]
+            [-l <foobar.so>] -o <out.mm> -i <map.simplemap> [--] [--version]
+            [-h]
 
 
-    Where: 
+    Where:
+
+    --decimate-max <N>
+        Try to evenly pick at most N frames
+
+    --decimate-nth <N>
+        Only process every N-th frame
 
     --to-index <0>
         If provided, the simplemap keyframes will be processed up to this
@@ -46,6 +54,10 @@ CLI Reference
     --from-index <0>
         If provided, the simplemap keyframes until this index will be
         discarded and it will start at this point.
+
+    --permit-missing-externals
+        If set, missing external files will generate a warning instead of an
+        exception stopping the processing.
 
     --profiler
         Enables profiler.
@@ -57,6 +69,11 @@ CLI Reference
     --externals-dir <<ExternalsDirectory>>
         Lazy-load base directory for datasets with externally-stored
         observations
+
+    --compression-method <METHOD>
+        Compression method to use in the output metric map .mm file. Options:
+        CompressionType::None|CompressionType::Gzip|CompressionType::Zstd.
+        (Default: CompressionType::Zstd)
 
     -v <INFO>,  --verbosity <INFO>
         Verbosity level: ERROR|WARN|INFO|DEBUG (Default: INFO)
