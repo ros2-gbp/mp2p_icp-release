@@ -26,7 +26,41 @@
 #include <mrpt/obs/CObservationComment.h>
 #include <mrpt/system/progress.h>
 
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
+#include <mp2p_icp/update_velocity_buffer_from_obs.h>
+#endif
+
+#include <algorithm>
+#include <cmath>
 #include <iostream>
+
+namespace
+{
+std::string first_n_lines(const std::string& input, std::size_t n)
+{
+    if (n == 0)
+    {
+        return {};
+    }
+
+    std::size_t pos   = 0;
+    std::size_t lines = 0;
+
+    while (lines < n)
+    {
+        pos = input.find('\n', pos);
+        if (pos == std::string::npos)
+        {
+            // Fewer than n lines: return entire string
+            return input;
+        }
+        ++pos;  // move past '\n'
+        ++lines;
+    }
+
+    return input.substr(0, pos);
+}
+}  // namespace
 
 void mp2p_icp_filters::simplemap_to_metricmap(
     const mrpt::maps::CSimpleMap& sm, mp2p_icp::metric_map_t& mm,
@@ -93,54 +127,6 @@ void mp2p_icp_filters::simplemap_to_metricmap(
     ps.updateVariables(options.customVariables);
     ps.realize();
 
-    const auto lambdaProcessLocalVelocityBuffer = [&](const mrpt::obs::CObservation::Ptr& obs)
-    {
-#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
-        auto obsComment = std::dynamic_pointer_cast<mrpt::obs::CObservationComment>(obs);
-        if (!obsComment)
-        {
-            return;
-        }
-
-        const auto commentYaml = [&]()
-        {
-            try
-            {
-                return mrpt::containers::yaml::FromText(obsComment->text);
-            }
-            catch (const std::exception& e)
-            {
-                std::cerr << "Error parsing YAML in comment: " << e.what() << std::endl;
-                return mrpt::containers::yaml();
-            }
-        }();
-
-        if (!commentYaml.isMap() || !commentYaml.has("local_velocity_buffer"))
-        {
-            return;
-        }
-
-        const auto lvb = commentYaml["local_velocity_buffer"];
-        if (!lvb.isMap())
-        {
-            std::cerr << "Error: 'local_velocity_buffer' field is not a map!" << std::endl;
-            return;
-        }
-
-        try
-        {
-            ps.localVelocityBuffer.fromYAML(lvb);
-        }
-        catch (const std::exception& e)
-        {
-            std::cerr << "Error parsing 'local_velocity_buffer': " << e.what() << std::endl;
-            return;
-        }
-#else
-        (void)obs;
-#endif
-    };
-
     // progress bar:
     if (options.showProgressBar)
     {
@@ -161,8 +147,59 @@ void mp2p_icp_filters::simplemap_to_metricmap(
         mrpt::keep_max(curKF, *options.start_index);
     }
 
+    if (options.decimate_every_nth_frame.has_value() &&
+        options.decimate_maximum_frame_count.has_value())
+    {
+        throw std::invalid_argument(
+            "sm2mm: 'decimate_every_nth_frame' and 'decimate_maximum_frame_count' "
+            "cannot be set simultaneously.");
+    }
+
+    // Determine the decimation stride (step size)
+    size_t stride = 1;
+
+    if (options.decimate_every_nth_frame.has_value())
+    {
+        stride = std::max<size_t>(1, *options.decimate_every_nth_frame);
+    }
+    else if (options.decimate_maximum_frame_count.has_value())
+    {
+        const size_t maxCount = *options.decimate_maximum_frame_count;
+        if (maxCount == 0)
+        {
+            return;  // No frames to process
+        }
+
+        const size_t totalInRange = (nKFs > curKF) ? (nKFs - curKF) : 0;
+
+        if (totalInRange > maxCount)
+        {
+            // To spread 'maxCount' frames evenly across 'totalInRange',
+            // we calculate the stride as ceil(total / maxCount).
+            stride = static_cast<size_t>(
+                std::ceil(static_cast<double>(totalInRange) / static_cast<double>(maxCount)));
+        }
+    }
+
+    size_t       processedKFs = 0;
+    const size_t startIdx     = curKF;
+
     for (; curKF < nKFs; curKF++)
     {
+        // Apply decimation logic
+        if ((curKF - startIdx) % stride != 0)
+        {
+            continue;
+        }
+
+        // Extra safety check for the frame count limit
+        if (options.decimate_maximum_frame_count.has_value() &&
+            processedKFs >= *options.decimate_maximum_frame_count)
+        {
+            break;
+        }
+
+        // Get KF data:
         const auto& [pose, sf, twist] = sm.get(curKF);
         if (twist.has_value())
         {
@@ -192,25 +229,46 @@ void mp2p_icp_filters::simplemap_to_metricmap(
         for (const auto& obs : *sf)
         {
             ASSERT_(obs);
-            lambdaProcessLocalVelocityBuffer(obs);
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
+            mp2p_icp::update_velocity_buffer_from_obs(ps.localVelocityBuffer, obs);
+#endif
         }
 
-        // Next, do the actual sensor data processing:
-        for (const auto& obs : *sf)
+        try
         {
-            ASSERT_(obs);
-            obs->load();
-
-            bool handled = mp2p_icp_filters::apply_generators(generators, *obs, mm, robotPose);
-
-            if (!handled)
+            // Next, do the actual sensor data processing:
+            for (const auto& obs : *sf)
             {
+                ASSERT_(obs);
+                obs->load();
+
+                bool handled = mp2p_icp_filters::apply_generators(generators, *obs, mm, robotPose);
+
+                if (!handled)
+                {
+                    obs->unload();
+                    continue;
+                }
+
+                // process it:
+                mp2p_icp_filters::apply_filter_pipeline(filters, mm, options.profiler);
+                obs->unload();
+            }
+        }
+        catch (const std::exception& e)
+        {
+            // If the exception msg contains "Assert file existence failed", it's due to missing
+            // external files.
+            const std::string errMsg = e.what();
+            if (errMsg.find("Assert file existence failed") != std::string::npos &&
+                !options.throw_on_missing_external_files)
+            {
+                std::cerr << "[sm2mm] Keyframe #" << curKF
+                          << ": skipping observation due to missing external files: "
+                          << first_n_lines(errMsg, 3) << "\n";
                 continue;
             }
-
-            // process it:
-            mp2p_icp_filters::apply_filter_pipeline(filters, mm, options.profiler);
-            obs->unload();
+            throw;  // Rethrow other exceptions
         }
 
 #if 0
@@ -246,6 +304,8 @@ void mp2p_icp_filters::simplemap_to_metricmap(
                              mrpt::system::formatTimeInterval(totalTime).c_str());
             std::cout.flush();
         }
+
+        processedKFs++;
     }  // end for each KF.
 
     // Final optional filtering:

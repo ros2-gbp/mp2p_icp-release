@@ -22,6 +22,7 @@
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/3rdparty/tclap/CmdLine.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/core/Clock.h>
 #include <mrpt/maps/CGenericPointsMap.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/os.h>
@@ -53,6 +54,12 @@ TCLAP::ValueArg<std::string> argExportFields(
     "provided, all available fields will be exported. Fields will be exported in "
     "the specified order.",
     false, "", "field1,field2,...", cmd);
+
+TCLAP::SwitchArg argIgnoreMissingFields(
+    "", "ignore-missing-fields",
+    "If defined, the lack of any of the --export-fields in the map will be considered a warning "
+    "instead of an error; missing fields are skipped.",
+    cmd);
 
 bool saveToTxt(
     const mrpt::maps::CGenericPointsMap& pts, const std::string& fileName, bool printHeader,
@@ -141,20 +148,20 @@ bool saveToTxt(
             // Check coordinate fields
             if (fieldName == "x")
             {
-                mrpt::system::os::fprintf(f, "%f", xs.at(i));
+                mrpt::system::os::fprintf(f, "%.8f", xs.at(i));
             }
             else if (fieldName == "y")
             {
-                mrpt::system::os::fprintf(f, "%f", ys.at(i));
+                mrpt::system::os::fprintf(f, "%.8f", ys.at(i));
             }
             else if (fieldName == "z")
             {
-                mrpt::system::os::fprintf(f, "%f", zs.at(i));
+                mrpt::system::os::fprintf(f, "%.8f", zs.at(i));
             }
             // Check float fields
             else if (floatFields.count(fieldName))
             {
-                mrpt::system::os::fprintf(f, "%f", floatFields.at(fieldName).at(i));
+                mrpt::system::os::fprintf(f, "%.8e", floatFields.at(fieldName).at(i));
             }
             // Check uint16 fields
             else if (uint16Fields.count(fieldName))
@@ -165,7 +172,7 @@ bool saveToTxt(
             // Check double fields
             else if (doubleFields.count(fieldName))
             {
-                mrpt::system::os::fprintf(f, "%lf", doubleFields.at(fieldName).at(i));
+                mrpt::system::os::fprintf(f, "%.16le", doubleFields.at(fieldName).at(i));
             }
             // Check uint8 fields
             else if (uint8Fields.count(fieldName))
@@ -201,11 +208,14 @@ void run_mm2txt()
     ASSERT_FILE_EXISTS_(argMapFile.getValue());
 
     std::cout << "[mm-info] Reading input map from: '" << filInput << "'..." << std::endl;
+    const double mm_t0 = mrpt::Clock::nowDouble();
 
     mp2p_icp::metric_map_t mm;
     mm.load_from_file(filInput);
 
-    std::cout << "[mm-info] Done read map. Contents:\n" << mm.contents_summary() << std::endl;
+    const double mm_t1 = mrpt::Clock::nowDouble();
+    std::cout << "[mm-info] Done read map in " << (mm_t1 - mm_t0) << " sec. Contents:\n"
+              << mm.contents_summary() << "\n";
 
     std::vector<std::string> layers;
     if (argLayers.isSet())
@@ -291,6 +301,7 @@ void run_mm2txt()
         if (auto* genxyz = dynamic_cast<const mrpt::maps::CGenericPointsMap*>(pts); genxyz)
         {
             // Validate selected fields exist in this point cloud
+            std::vector<std::string> validFields;
             if (!selectedFields.empty())
             {
                 const auto& floatFields  = genxyz->float_fields();
@@ -331,16 +342,33 @@ void run_mm2txt()
                             std::cerr << ", " << fname;
                         }
 #endif
-                        std::cerr << std::endl;
-                        THROW_EXCEPTION_FMT(
-                            "Field '%s' specified in --export-fields not found in layer '%s'",
-                            field.c_str(), name.c_str());
+                        std::cerr << " - skipping this field." << std::endl;
+                        if (!argIgnoreMissingFields.isSet())
+                        {
+                            THROW_EXCEPTION_FMT(
+                                "Field '%s' specified in --export-fields not found in layer '%s'",
+                                field.c_str(), name.c_str());
+                        }
+                    }
+                    else
+                    {
+                        validFields.push_back(field);
                     }
                 }
+                if (validFields.empty())
+                {
+                    std::cerr << "Warning: None of the requested fields exist in layer '" << name
+                              << "'. Skipping export for this layer." << std::endl;
+                    continue;
+                }
+            }
+            else
+            {
+                validFields = selectedFields;
             }
 
             bool printHeader = true;
-            saveToTxt(*genxyz, filName, printHeader, selectedFields);
+            saveToTxt(*genxyz, filName, printHeader, validFields);
         }
 #if MRPT_VERSION < 0x030000  // <3.0.0
         else
@@ -389,7 +417,7 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& e)
     {
-        std::cerr << e.what();
+        std::cerr << e.what() << std::endl;
         return 1;
     }
     return 0;
