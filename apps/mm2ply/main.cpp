@@ -46,12 +46,18 @@ TCLAP::ValueArg<std::string> argExportFields(
     "the specified order.",
     false, "", "field1,field2,...", cmd);
 
+TCLAP::SwitchArg argIgnoreMissingFields(
+    "", "ignore-missing-fields",
+    "If defined, the lack of any of the --export-fields in the map will be considered a warning "
+    "instead of an error; missing fields are skipped.",
+    cmd);
+
 // ----------------------------------------------------------------
 // PLY Export Logic using CPointsMap field-generic API
 // ----------------------------------------------------------------
 void saveToPly(
     const mrpt::maps::CPointsMap& pc, const std::string& filename, bool binary,
-    const std::vector<std::string>& selectedFields = {})
+    const std::vector<std::string>& selectedFields = {}, bool ignoreMissingFields = false)
 {
     std::ofstream f;
     f.open(filename, binary ? std::ios::binary : std::ios::out);
@@ -264,14 +270,19 @@ void saveToPly(
 #endif
             if (!found)
             {
-                throw std::runtime_error("Field not found: " + fieldName);
+                if (!ignoreMissingFields)
+                {
+                    throw std::runtime_error("Field not found: " + fieldName);
+                }
+                // Mark this accessor as invalid (nullptr) - will output zeros
+                acc.bufPtr = nullptr;
             }
         }
         accessors.push_back(acc);
     }
 
     // 4. Data Loop
-    auto write_val = [&](auto val)
+    auto write_val = [&](auto val, const char* fmt)
     {
         if (binary)
         {
@@ -279,7 +290,7 @@ void saveToPly(
         }
         else
         {
-            f << +val << " ";
+            f << mrpt::format(fmt, val) << " ";
         }
     };
 
@@ -287,6 +298,33 @@ void saveToPly(
     {
         for (const auto& acc : accessors)
         {
+            // Handle missing fields (when ignoreMissingFields is true)
+            if (acc.bufPtr == nullptr)
+            {
+                // Output zero for missing fields
+                switch (acc.type)
+                {
+                    case FieldAccessor::FLOAT:
+                        write_val(0.0f, "%.8e");
+                        break;
+#if MRPT_VERSION >= 0x020f03
+                    case FieldAccessor::DOUBLE:
+                        write_val(0.0, "%.16le");
+                        break;
+                    case FieldAccessor::UINT16:
+                        write_val(static_cast<uint16_t>(0), "%u");
+                        break;
+                    case FieldAccessor::UINT8:
+                        write_val(static_cast<uint8_t>(0), "%i");
+                        break;
+#endif
+                    default:
+                        write_val(0.0f, "%.8e");
+                        break;
+                }
+                continue;
+            }
+
             switch (acc.type)
             {
                 default:
@@ -296,7 +334,7 @@ void saveToPly(
                 {
                     const auto& buf =
                         *static_cast<const mrpt::aligned_std_vector<float>*>(acc.bufPtr);
-                    write_val(buf[i]);
+                    write_val(buf[i], "%.8e");
                     break;
                 }
 #if MRPT_VERSION >= 0x020f03  // 2.15.3
@@ -304,21 +342,21 @@ void saveToPly(
                 {
                     const auto& buf =
                         *static_cast<const mrpt::aligned_std_vector<double>*>(acc.bufPtr);
-                    write_val(buf[i]);
+                    write_val(buf[i], "%.16le");
                     break;
                 }
                 case FieldAccessor::UINT16:
                 {
                     const auto& buf =
                         *static_cast<const mrpt::aligned_std_vector<uint16_t>*>(acc.bufPtr);
-                    write_val(buf[i]);
+                    write_val(buf[i], "%u");
                     break;
                 }
                 case FieldAccessor::UINT8:
                 {
                     const auto& buf =
                         *static_cast<const mrpt::aligned_std_vector<uint8_t>*>(acc.bufPtr);
-                    write_val(buf[i]);
+                    write_val(buf[i], "%i");
                     break;
                 }
 #endif
@@ -387,6 +425,7 @@ int main(int argc, char** argv)
             {
                 continue;
             }
+            std::vector<std::string> validFields;
 
             // Validate selected fields exist in this point cloud
             if (!selectedFields.empty())
@@ -398,6 +437,7 @@ int main(int argc, char** argv)
                 const auto u8_names  = pts->getPointFieldNames_uint8();
 #endif
 
+                // Filter selectedFields to only include fields that exist
                 for (const auto& field : selectedFields)
                 {
                     bool found = (field == "x" || field == "y" || field == "z");
@@ -471,17 +511,30 @@ int main(int argc, char** argv)
                             std::cerr << ", " << fn;
                         }
 #endif
-                        std::cerr << std::endl;
-                        throw std::runtime_error(
-                            "Field '" + field +
-                            "' specified in --export-fields not found in layer '" + name + "'");
+                        std::cerr << " - skipping this field." << std::endl;
+                        if (!argIgnoreMissingFields.isSet())
+                        {
+                            throw std::runtime_error(
+                                "Field '" + field +
+                                "' specified in --export-fields not found in layer '" + name + "'");
+                        }
                     }
+                    else
+                    {
+                        validFields.push_back(field);
+                    }
+                }
+                if (validFields.empty())
+                {
+                    std::cerr << "Warning: None of the requested fields exist in layer '" << name
+                              << "'. Skipping export for this layer." << std::endl;
+                    continue;
                 }
             }
 
             std::string out = prefix + "_" + name + ".ply";
             std::cout << "Exporting '" << name << "' to " << out << "..." << std::endl;
-            saveToPly(*pts, out, arg_binary.getValue(), selectedFields);
+            saveToPly(*pts, out, arg_binary.getValue(), validFields);
         }
     }
     catch (const std::exception& e)
