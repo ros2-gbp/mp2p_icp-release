@@ -1,0 +1,12 @@
+Source: ros-kilted-mp2p-icp
+Section: misc
+Priority: optional
+Maintainer: Jose-Luis Blanco-Claraco <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, libtbb-dev, ros-kilted-mola-common, ros-kilted-mola-imu-preintegration, ros-kilted-mrpt-libbase, ros-kilted-mrpt-libgui, ros-kilted-mrpt-libmaps, ros-kilted-mrpt-libobs, ros-kilted-mrpt-libposes, ros-kilted-mrpt-libtclap, ros-kilted-ros-environment, ros-kilted-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-kilted-mp2p-icp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libtbb-dev, ros-kilted-mola-common, ros-kilted-mola-imu-preintegration, ros-kilted-mrpt-libbase, ros-kilted-mrpt-libgui, ros-kilted-mrpt-libmaps, ros-kilted-mrpt-libobs, ros-kilted-mrpt-libposes, ros-kilted-mrpt-libtclap, ros-kilted-ros-workspace
+Description: A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
