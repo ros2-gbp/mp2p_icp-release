@@ -10,6 +10,11 @@ or via a YAML file using the **filter pipeline** API, e.g.
 :cpp:class:`mp2p_icp_filters::filter_pipeline_from_yaml()` 
 or :cpp:class:`mp2p_icp_filters::filter_pipeline_from_yaml_file()`.
 
+.. note::
+
+    👉 There is an `online graphical editor for sm2mm pipelines <https://molaorg.github.io/pipelines-editor/>`_
+
+
 ____________________________________________
 
 .. contents:: Available filters
@@ -30,9 +35,9 @@ The absolute timestamps are stored in a new double-precision field (default name
 
 **Parameters**:
 
-* **pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The point cloud layer to process.
+* **pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The point cloud layer to process (it's both input and output).
 
-* **output\_field\_name** (:cpp:type:`std::string`, default: `timestamp_abs`): The name of the new output field where absolute timestamps will be stored.
+* **output\_field\_name** (:cpp:type:`std::string`, default: `timestamp_abs`): The name of the new output field where absolute timestamps will be stored (type ``double``).
 
 .. code-block:: yaml
 
@@ -231,6 +236,34 @@ Filter: `FilterByRing`
 
 .. image:: by_ring_example.png
    :alt: Screenshot showing point cloud before and after applying FilterByRing
+
+|
+
+---
+
+Filter: `FilterClear`
+----------------------
+
+**Description**: Clears (empties) a given metric map layer by calling its virtual ``clear()`` method.
+
+This filter removes all points/features from a metric map layer while keeping the layer itself in the ``metric_map_t`` structure. After clearing, the layer exists but contains no data, and can be refilled with new points.
+
+This is useful for:
+- Resetting a layer to an empty state during processing pipelines
+- Clearing temporary or intermediate layers before reuse
+- Managing memory by removing data while maintaining layer structure
+
+**Parameters**:
+
+* **target_layer** (:cpp:type:`std::string`, required): The name of the metric map layer to clear.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterClear
+        params:
+          target_layer: 'observation'
 
 |
 
@@ -831,6 +864,77 @@ This is typically used to separate **static** (high occupancy) and **dynamic** (
 
 .. image:: remove_by_voxel_occupancy_example.png
    :alt: Screenshot showing point cloud before and after applying FilterRemoveByVoxelOccupancy
+
+|
+
+---
+
+
+Filter: `FilterRemovePointCloudField`
+--------------------------------------
+
+**Description**: Unregisters (removes) one or more custom point cloud fields from a ``CGenericPointsMap`` layer.
+
+This filter completely removes previously registered custom fields of any supported type (``float``, ``double``, ``uint16_t``, ``uint8_t``) from a point cloud layer. The fields and all their associated data are deleted, freeing the memory.
+
+Unlike clearing data, this operation removes the field definitions themselves, as if they had never been registered. After removal, attempting to access the fields will fail unless they are registered again.
+
+**Important**: This filter only works with layers containing ``mrpt::maps::CGenericPointsMap`` or derived classes. Other map types (like ``CSimplePointsMap``) will be silently skipped.
+
+**Parameters**:
+
+* **pointcloud_layer** (:cpp:type:`std::string`, default: `raw`): The point cloud layer to process.
+
+* **field_names** (:cpp:type:`std::string` or :cpp:type:`std::vector<std::string>`, required): One or more custom field names to remove (e.g., ``intensity``, ``ring``, ``timestamp_abs``, or any user-defined field names). Can be specified as a single string or as a list/sequence.
+
+* **throw_on_missing_field** (:cpp:type:`bool`, default: `true`): Whether to throw an exception if any of the specified fields does not exist. If ``false``, missing fields are silently ignored.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      # Remove a single timestamp field that's no longer needed
+      - class_name: mp2p_icp_filters::FilterRemovePointCloudField
+        params:
+          pointcloud_layer: 'raw'
+          field_names: 'timestamp_abs'
+          throw_on_missing_field: true
+
+      # Remove multiple fields at once
+      - class_name: mp2p_icp_filters::FilterRemovePointCloudField
+        params:
+          pointcloud_layer: 'raw'
+          field_names: ['intensity', 'ring', 'timestamp_abs']
+          throw_on_missing_field: false
+
+|
+
+---
+
+Filter: `FilterRenameLayer`
+---------------------------
+
+**Description**: Renames a layer within a metric map.
+This filter takes a layer (which can be of any class) and changes its key
+in the map to a new name. If a layer with the output name already exists, it is overwritten.
+
+**Parameters**:
+
+* **input_layer** (:cpp:type:`std::string`): The current name of the layer to be renamed.
+
+* **output_layer** (:cpp:type:`std::string`): The new name for the layer.
+
+* **fail_if_input_layer_does_not_exist** (:cpp:type:`bool`, default: `true`): Can be set to `false` to silently ignore missing input layers.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterRenameLayer
+        params:
+          input_layer: 'raw_points'
+          output_layer: 'processed_points'
+          fail_if_input_layer_does_not_exist: true
 
 |
 
