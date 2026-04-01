@@ -27,10 +27,16 @@
 
 using namespace mp2p_icp_filters;
 
+// Internal per-voxel bookkeeping: stores point indices for each voxel.
+struct VoxelEntry
+{
+    std::vector<std::size_t> indices;
+};
+
 struct PointCloudToVoxelGrid::Impl
 {
-    tsl::robin_map<indices_t, voxel_t, IndicesHash> pts_voxels;
-    std::map<indices_t, voxel_t, IndicesHash>       pts_voxels_std_map;
+    tsl::robin_map<indices_t, VoxelEntry, IndicesHash> pts_voxels;
+    std::map<indices_t, VoxelEntry, IndicesHash>       pts_voxels_std_map;
 };
 
 PointCloudToVoxelGrid::PointCloudToVoxelGrid() : impl_(mrpt::make_impl<Impl>()) {}
@@ -51,41 +57,28 @@ void PointCloudToVoxelGrid::processPointCloud(
     const mrpt::maps::CPointsMap& p, const std::size_t first_pt_idx,
     const std::size_t points_to_process)
 {
-    using mrpt::max3;
-    using std::abs;
-
     const auto& xs = p.getPointsBufferRef_x();
     const auto& ys = p.getPointsBufferRef_y();
     const auto& zs = p.getPointsBufferRef_z();
 
     const auto last_pt_idx = points_to_process ? (first_pt_idx + points_to_process) : xs.size();
 
-    // Duplicated code in the two if() branches for low-level efficiency.
-    if (use_tsl_robin_map_)
+    auto pass = [&](auto& voxels)
     {
-        auto& pts_voxels = impl_->pts_voxels;
-        // Previous point:
-        pts_voxels.reserve(pts_voxels.size() + last_pt_idx - first_pt_idx);
-
         for (std::size_t i = first_pt_idx; i < last_pt_idx; i++)
         {
-            const indices_t vxl_idx = {coord2idx(xs[i]), coord2idx(ys[i]), coord2idx(zs[i])};
-
-            auto& cell = pts_voxels[vxl_idx];
-            cell.indices.push_back(i);
+            const indices_t key = {coord2idx(xs[i]), coord2idx(ys[i]), coord2idx(zs[i])};
+            voxels[key].indices.push_back(i);
         }
+    };
+
+    if (use_tsl_robin_map_)
+    {
+        pass(impl_->pts_voxels);
     }
     else
     {
-        auto& pts_voxels = impl_->pts_voxels_std_map;
-
-        for (std::size_t i = first_pt_idx; i < last_pt_idx; i++)
-        {
-            const indices_t vxl_idx = {coord2idx(xs[i]), coord2idx(ys[i]), coord2idx(zs[i])};
-
-            auto& cell = pts_voxels[vxl_idx];
-            cell.indices.push_back(i);
-        }
+        pass(impl_->pts_voxels_std_map);
     }
 }
 
@@ -93,6 +86,9 @@ void PointCloudToVoxelGrid::clear()
 {
     if (use_tsl_robin_map_)
     {
+        // Low min_load_factor lets clear() shrink the bucket array, freeing
+        // peak memory rather than retaining it across filter invocations.
+        impl_->pts_voxels.min_load_factor(0.01f);
         impl_->pts_voxels.clear();
     }
     else
@@ -104,23 +100,28 @@ void PointCloudToVoxelGrid::clear()
 void PointCloudToVoxelGrid::visit_voxels(
     const std::function<void(const indices_t idx, const voxel_t& vxl)>& userCode) const
 {
+    auto visit = [&](const auto& voxels)
+    {
+        for (const auto& [idx, entry] : voxels)
+        {
+            voxel_t view;
+            view.begin_ptr = entry.indices.data();
+            view.count     = static_cast<uint32_t>(entry.indices.size());
+            userCode(idx, view);
+        }
+    };
+
     if (use_tsl_robin_map_)
     {
-        for (const auto& [idx, vxl] : impl_->pts_voxels)
-        {
-            userCode(idx, vxl);
-        }
+        visit(impl_->pts_voxels);
     }
     else
     {
-        for (const auto& [idx, vxl] : impl_->pts_voxels_std_map)
-        {
-            userCode(idx, vxl);
-        }
+        visit(impl_->pts_voxels_std_map);
     }
 }
 
-size_t PointCloudToVoxelGrid::size() const
+std::size_t PointCloudToVoxelGrid::size() const
 {
     return use_tsl_robin_map_ ? impl_->pts_voxels.size() : impl_->pts_voxels_std_map.size();
 }
