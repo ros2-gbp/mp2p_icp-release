@@ -22,15 +22,16 @@
 #include <mola_imu_preintegration/ImuIntegrationParams.h>
 #include <mola_imu_preintegration/ImuTransformer.h>
 #include <mola_imu_preintegration/trajectory_from_buffer.h>
+
+#include <stdexcept>
 #endif
 
+#include <mp2p_icp/pointcloud_field_utils.h>
 #include <mp2p_icp_filters/FilterDeskew.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/core/Clock.h>
 #include <mrpt/core/exceptions.h>
-#include <mrpt/maps/CPointsMapXYZIRT.h>
-#include <mrpt/maps/CSimplePointsMap.h>
 #include <mrpt/poses/Lie/SO.h>
 #include <mrpt/version.h>
 
@@ -57,6 +58,7 @@ void FilterDeskew::initialize_filter(const mrpt::containers::yaml& c)
     MCP_LOAD_OPT(c, in_place);
 
     MCP_LOAD_OPT(c, points_already_global);
+    MCP_LOAD_OPT(c, ignore_accelerometer);
 
     auto handleVectorParam = [&](const std::string& key, auto& vec, const std::size_t dim)
     {
@@ -153,10 +155,6 @@ auto findBeforeAfter(const mola::imu::Trajectory& trajectory, const double t)
     return {before, lower};
 }
 #endif  // MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION
-
-#if MRPT_VERSION < 0x020f00  // 2.15.0
-#error "MRPT >= 2.15.0 is required to compile FilterDeskew"
-#endif
 
 struct CorrectPointsArguments
 {
@@ -360,26 +358,22 @@ void correctPointsLoop(const CorrectPointsArguments& args)
             {
                 outPc->setPointFast(n0 + i, corrPt.x, corrPt.y, corrPt.z);
 
-            // Copy additional fields using the insertion context:
-#if MRPT_VERSION >= 0x020f02  // >=2.15.2
+                // Copy additional fields using the insertion context:
                 for (auto& [src, dst] : ctxCopyPointFields->double_fields)
                 {
-                    (*dst)[n0 + i] = (*src)[i];
+                    (*dst)[n0 + i] = src ? (*src)[i] : 0.0;
                 }
-#endif
-#if MRPT_VERSION >= 0x020f03  // >=2.15.3
                 for (auto& [src, dst] : ctxCopyPointFields->uint8_fields)
                 {
-                    (*dst)[n0 + i] = (*src)[i];
+                    (*dst)[n0 + i] = src ? (*src)[i] : uint8_t{0};
                 }
-#endif
                 for (auto& [src, dst] : ctxCopyPointFields->float_fields)
                 {
-                    (*dst)[n0 + i] = (*src)[i];
+                    (*dst)[n0 + i] = src ? (*src)[i] : 0.0f;
                 }
                 for (auto& [src, dst] : ctxCopyPointFields->uint16_fields)
                 {
-                    (*dst)[n0 + i] = (*src)[i];
+                    (*dst)[n0 + i] = src ? (*src)[i] : uint16_t{0};
                 }
             }
         }
@@ -440,6 +434,7 @@ void FilterDeskew::filter(mp2p_icp::metric_map_t& inOut) const
 
         // and then, prepare structures for fast copying:
         insert_ctx = outPc->prepareForInsertPointsFrom(*inPc);
+        mp2p_icp::warn_on_field_padding_mismatch(*inPc, *outPc, *this);
     }
 
     // If the input is empty, just move on:
@@ -528,13 +523,35 @@ void FilterDeskew::filter(mp2p_icp::metric_map_t& inOut) const
 
             // Recall, the reference time should have been set already by the Generator and/or
             // FilterAdjustTimestamps:
-            const auto sample_history =
+            // Note: "non-const" just for the "ignore_accelerometer" filter below.
+            auto sample_history =
                 ps->localVelocityBuffer.collect_samples_around_reference_time(2 * scan_time_span);
 
             const bool use_higher_order = (method == MotionCompensationMethod::IMUh);
 
             if (!sample_history.by_time.empty())
             {
+                // Optionally suppress accelerometer contribution entirely.
+                // Zeroing a_b here makes trajectory_from_buffer integrate with
+                // ac_b = gravity_b only (gravity cancels out in the body frame),
+                // reducing position integration to gyro + constant-velocity-per-interval.
+                // This avoids lever-arm noise from corrupting the deskew path when the
+                // IMU/LiDAR offset is large and the accelerometer signal is unreliable.
+                if (ignore_accelerometer)
+                {
+                    // Zero every a_b in by_type (used by find_closest fallback in
+                    // trajectory_from_buffer) — do NOT clear the map, as find_closest
+                    // on an empty map would crash.
+                    for (auto& [stamp, val] : sample_history.by_type.a_b)
+                    {
+                        val = {0, 0, 0};
+                    }
+                    for (auto& [stamp, sample] : sample_history.by_time)
+                    {
+                        sample.a_b = {0, 0, 0};
+                    }
+                }
+
                 reconstructed_trajectory =
                     mola::imu::trajectory_from_buffer(sample_history, imu_params, use_higher_order);
             }
