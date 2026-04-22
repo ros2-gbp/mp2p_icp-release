@@ -61,8 +61,8 @@ enum class MotionCompensationMethod : uint8_t
  *   reference time point, which can be the start or middle point of the scan. This can be
  *   controlled by adding a FilterAdjustTimestamps before this block.
  *
- * - The input layer must contain a point cloud in the format
- *   mrpt::maps::CPointsMapXYZIRT or mrpt::maps::CGenericPointsMap so timestamps are present.
+ * - The input layer must contain a point cloud of type mrpt::maps::CGenericPointsMap
+ *   so timestamps are present.
  *
  * - If the input layer is of a different type, or the `t` field is missing,
  *   an exception will be thrown by default, unless the option
@@ -147,6 +147,17 @@ class FilterDeskew : public mp2p_icp_filters::FilterBase
 
     /// Gravity vector (in global frame)
     mrpt::math::TVector3D gravity_vector{0, 0, -9.81};
+
+    /** If set to `true`, accelerometer readings are completely ignored during IMU-based path
+     * integration.  Rotation (gyroscope) and the initial velocity seed are still used, so the
+     * trajectory is reconstructed with a **gyroscope-only, constant-velocity-between-frames**
+     * model.
+     *
+     * This is useful when the lever arm between `base_link` and the IMU/LiDAR is large and
+     * the accelerometer correction is noisier than a simple constant-velocity assumption.
+     * Has no effect when `method` is `Linear` or `None`.
+     */
+    bool ignore_accelerometer = false;
 };
 
 /** @} */
