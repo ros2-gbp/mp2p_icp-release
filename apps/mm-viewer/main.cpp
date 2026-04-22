@@ -22,6 +22,7 @@
 #include <mrpt/config.h>
 #include <mrpt/config/CConfigFile.h>
 #include <mrpt/core/round.h>
+#include <mrpt/io/CCompressedInputStream.h>
 #include <mrpt/math/TObject3D.h>
 #include <mrpt/math/geometry.h>
 #include <mrpt/opengl/CArrow.h>
@@ -30,6 +31,7 @@
 #include <mrpt/opengl/CPointCloudColoured.h>
 #include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPose3DInterpolator.h>
+#include <mrpt/serialization/CArchive.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/system/os.h>  // loadPluginModules()
 #include <mrpt/system/string_utils.h>  // unitsFormat()
@@ -77,27 +79,30 @@ mrpt::opengl::CSetOfObjects::Ptr glVizObjects;
 
 mrpt::gui::CDisplayWindowGUI::Ptr win;
 
-std::array<nanogui::TextBox*, 2> lbMapStats              = {nullptr, nullptr};
-nanogui::CheckBox*               cbApplyGeoRef           = nullptr;
-nanogui::CheckBox*               cbViewOrtho             = nullptr;
-nanogui::CheckBox*               cbView2D                = nullptr;
-nanogui::CheckBox*               cbViewVoxelsAsPoints    = nullptr;
-nanogui::CheckBox*               cbViewVoxelsFreeSpace   = nullptr;
-nanogui::CheckBox*               cbColorizeMap           = nullptr;
-nanogui::CheckBox*               cbKeepNativeCloudColors = nullptr;
-nanogui::ComboBox*               cmbColorIntensity       = nullptr;
-nanogui::ComboBox*               cmbRecolorizeByField    = nullptr;
-nanogui::CheckBox*               cbShowGroundGrid        = nullptr;
-nanogui::Slider*                 slPointSize             = nullptr;
-nanogui::Slider*                 slTrajectoryThickness   = nullptr;
-nanogui::Slider*                 slMidDepthField         = nullptr;
-nanogui::Slider*                 slThicknessDepthField   = nullptr;
-nanogui::Slider*                 slCameraFOV             = nullptr;
-nanogui::Label*                  lbCameraFOV             = nullptr;
-nanogui::Label*                  lbMousePos              = nullptr;
-nanogui::ComboBox*               cbMouseUnits            = nullptr;
-nanogui::Button*                 btnCopyCoords           = nullptr;
-nanogui::Label*                  lbCameraPointing        = nullptr;
+std::array<nanogui::TextBox*, 2> lbMapStats                   = {nullptr, nullptr};
+nanogui::CheckBox*               cbApplyGeoRef                = nullptr;
+nanogui::CheckBox*               cbViewOrtho                  = nullptr;
+nanogui::CheckBox*               cbView2D                     = nullptr;
+nanogui::CheckBox*               cbViewVoxelsAsPoints         = nullptr;
+nanogui::CheckBox*               cbViewVoxelsFreeSpace        = nullptr;
+nanogui::CheckBox*               cbColorizeMap                = nullptr;
+nanogui::CheckBox*               cbKeepNativeCloudColors      = nullptr;
+nanogui::CheckBox*               cbAutoBBoxOutliers           = nullptr;
+nanogui::Slider*                 slAutoBBoxOutliersPercentile = nullptr;
+nanogui::Label*                  lbAutoBBoxOutliersPercentile = nullptr;
+nanogui::ComboBox*               cmbColorIntensity            = nullptr;
+nanogui::ComboBox*               cmbRecolorizeByField         = nullptr;
+nanogui::CheckBox*               cbShowGroundGrid             = nullptr;
+nanogui::Slider*                 slPointSize                  = nullptr;
+nanogui::Slider*                 slTrajectoryThickness        = nullptr;
+nanogui::Slider*                 slMidDepthField              = nullptr;
+nanogui::Slider*                 slThicknessDepthField        = nullptr;
+nanogui::Slider*                 slCameraFOV                  = nullptr;
+nanogui::Label*                  lbCameraFOV                  = nullptr;
+nanogui::Label*                  lbMousePos                   = nullptr;
+nanogui::ComboBox*               cbMouseUnits                 = nullptr;
+nanogui::Button*                 btnCopyCoords                = nullptr;
+nanogui::Label*                  lbCameraPointing             = nullptr;
 nanogui::Label *                 lbDepthFieldValues = nullptr, *lbDepthFieldMid = nullptr,
                *lbDepthFieldThickness = nullptr, *lbPointSize = nullptr;
 nanogui::Label*    lbTrajectoryThick = nullptr;
@@ -155,34 +160,66 @@ bool loadMapFile(const std::string& mapFile)
     // Load one single file:
     std::cout << "Loading map file: " << mapFile << std::endl;
 
-    std::string loadErrorMsg;
+    theMap = mp2p_icp::metric_map_t();  // reset
 
-    if (!theMap.load_from_file(mapFile, loadErrorMsg))
+    if (mrpt::system::extractFileExtension(mapFile) == "bin")
     {
-        bool retry_was_successful = false;
-
-        // If it fails and it's because of a missing plugin, try to load plugins to make life of
-        // users easier:
-        if (loadErrorMsg.find("which is not registered") != std::string::npos &&
-            !arg_plugins.isSet())
+        // Load as externally-stored CGenericPointsMap via CCompressedInputStream
+        try
         {
-            std::cout << "The map file requires plugins for missing C++ classes.\n"
-                         "Trying to load 'libmola_metric_maps.so' and retrying.\n"
-                         "Note that you can directly use '-l libmola_metric_maps.so' or any other "
-                         "custom plugin next time.\n";
-
-            if (!load_plugins("libmola_metric_maps.so"))
+            mrpt::io::CCompressedInputStream        f(mapFile);
+            auto                                    arch = mrpt::serialization::archiveFrom(f);
+            mrpt::serialization::CSerializable::Ptr obj  = arch.ReadObject();
+            auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(obj);
+            if (!pts)
             {
+                std::cerr << "Error: .bin file did not deserialize to a CPointsMap-derived object"
+                          << (obj ? std::string(" (got: ") + obj->GetRuntimeClass()->className + ")"
+                                  : std::string(" (null object)"))
+                          << std::endl;
                 return false;
             }
-            // Retry:
-            retry_was_successful = theMap.load_from_file(mapFile, loadErrorMsg);
+            const std::string layerName = mrpt::system::extractFileName(mapFile);
+            theMap.layers[layerName]    = pts;
         }
-
-        if (!retry_was_successful)
+        catch (const std::exception& e)
         {
-            std::cerr << "Error loading metric map from file!:\n" << loadErrorMsg << std::endl;
+            std::cerr << "Error loading .bin file: " << e.what() << std::endl;
             return false;
+        }
+    }
+    else
+    {
+        std::string loadErrorMsg;
+
+        if (!theMap.load_from_file(mapFile, loadErrorMsg))
+        {
+            bool retry_was_successful = false;
+
+            // If it fails and it's because of a missing plugin, try to load plugins to make life of
+            // users easier:
+            if (loadErrorMsg.find("which is not registered") != std::string::npos &&
+                !arg_plugins.isSet())
+            {
+                std::cout
+                    << "The map file requires plugins for missing C++ classes.\n"
+                       "Trying to load 'libmola_metric_maps.so' and retrying.\n"
+                       "Note that you can directly use '-l libmola_metric_maps.so' or any other "
+                       "custom plugin next time.\n";
+
+                if (!load_plugins("libmola_metric_maps.so"))
+                {
+                    return false;
+                }
+                // Retry:
+                retry_was_successful = theMap.load_from_file(mapFile, loadErrorMsg);
+            }
+
+            if (!retry_was_successful)
+            {
+                std::cerr << "Error loading metric map from file!:\n" << loadErrorMsg << std::endl;
+                return false;
+            }
         }
     }
 
@@ -191,6 +228,7 @@ bool loadMapFile(const std::string& mapFile)
     // Obtain layer info:
     std::cout << "Loaded map: " << theMap.contents_summary() << std::endl;
 
+    layerNames.clear();
     for (const auto& [name, map] : theMap.layers)
     {
         layerNames.push_back(name);
@@ -774,8 +812,10 @@ void main_show_gui()
                 {
                     try
                     {
-                        const auto fil =
-                            nanogui::file_dialog({{"mm", "Metric maps (*.mm)"}}, false);
+                        const auto fil = nanogui::file_dialog(
+                            {{"mm", "Metric maps (*.mm)"},
+                             {"bin", "Serialized CGenericPointsMap (*.bin)"}},
+                            false);
                         if (fil.empty())
                         {
                             return;
@@ -880,6 +920,36 @@ void main_show_gui()
     cbKeepNativeCloudColors->setFontSize(MID_FONT_SIZE);
     cbKeepNativeCloudColors->setChecked(false);
     cbKeepNativeCloudColors->setCallback([&](bool) { rebuild_3d_view(); });
+
+    {
+        auto pn = tab2->add<nanogui::Widget>();
+        pn->setLayout(
+            new nanogui::GridLayout(nanogui::Orientation::Horizontal, 3, nanogui::Alignment::Fill));
+
+        cbAutoBBoxOutliers = pn->add<nanogui::CheckBox>("Outlier percentile:");
+        cbAutoBBoxOutliers->setFontSize(MID_FONT_SIZE);
+        cbAutoBBoxOutliers->setChecked(true);
+        cbAutoBBoxOutliers->setCallback(
+            [&](bool checked)
+            {
+                slAutoBBoxOutliersPercentile->setEnabled(checked);
+                lbAutoBBoxOutliersPercentile->setEnabled(checked);
+                rebuild_3d_view(true);
+            });
+
+        lbAutoBBoxOutliersPercentile = pn->add<nanogui::Label>("0.025");
+        lbAutoBBoxOutliersPercentile->setFontSize(MID_FONT_SIZE);
+
+        slAutoBBoxOutliersPercentile = pn->add<nanogui::Slider>();
+        slAutoBBoxOutliersPercentile->setRange({0.0f, 0.25f});
+        slAutoBBoxOutliersPercentile->setValue(0.025f);
+        slAutoBBoxOutliersPercentile->setCallback(
+            [&](float v)
+            {
+                lbAutoBBoxOutliersPercentile->setCaption(mrpt::format("%.3f", v));
+                rebuild_3d_view(true);
+            });
+    }
 
     tab2->add<nanogui::Label>(" ");
     {
@@ -1236,9 +1306,11 @@ void main_show_gui()
         LOAD_CB_STATE(cbViewVoxelsFreeSpace);
         LOAD_CB_STATE(cbColorizeMap);
         LOAD_CB_STATE(cbKeepNativeCloudColors);
+        LOAD_CB_STATE(cbAutoBBoxOutliers);
         LOAD_CB_STATE(cbShowGroundGrid);
 
         LOAD_SL_STATE(slPointSize);
+        LOAD_SL_STATE(slAutoBBoxOutliersPercentile);
         LOAD_SL_STATE(slTrajectoryThickness);
         LOAD_SL_STATE(slMidDepthField);
         LOAD_SL_STATE(slThicknessDepthField);
@@ -1264,9 +1336,11 @@ void main_show_gui()
         SAVE_CB_STATE(cbViewVoxelsFreeSpace);
         SAVE_CB_STATE(cbColorizeMap);
         SAVE_CB_STATE(cbKeepNativeCloudColors);
+        SAVE_CB_STATE(cbAutoBBoxOutliers);
         SAVE_CB_STATE(cbShowGroundGrid);
 
         SAVE_SL_STATE(slPointSize);
+        SAVE_SL_STATE(slAutoBBoxOutliersPercentile);
         SAVE_SL_STATE(slTrajectoryThickness);
         SAVE_SL_STATE(slMidDepthField);
         SAVE_SL_STATE(slThicknessDepthField);
@@ -1282,6 +1356,12 @@ void main_show_gui()
 
     // load UI state from last session:
     load_UI_state_from_user_config();
+
+    // Sync derived widget states after load:
+    lbAutoBBoxOutliersPercentile->setCaption(
+        mrpt::format("%.3f", slAutoBBoxOutliersPercentile->value()));
+    slAutoBBoxOutliersPercentile->setEnabled(cbAutoBBoxOutliers->checked());
+    lbAutoBBoxOutliersPercentile->setEnabled(cbAutoBBoxOutliers->checked());
 
     // Build 3D:
     rebuild_3d_view();
@@ -1381,6 +1461,11 @@ void rebuild_3d_view(bool force_rebuild_view)
 
             cm.recolorizeByField =
                 cmbRecolorizeByField->items().at(cmbRecolorizeByField->selectedIndex());
+
+            if (cbAutoBBoxOutliers->checked())
+            {
+                cm.autoBoundingBoxOutliersPercentile = slAutoBBoxOutliersPercentile->value();
+            }
         }
         if (cbKeepNativeCloudColors->checked())
         {
