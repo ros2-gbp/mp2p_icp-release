@@ -1,0 +1,12 @@
+Source: ros-lyrical-mp2p-icp
+Section: misc
+Priority: optional
+Maintainer: Jose-Luis Blanco-Claraco <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, libtbb-dev, ros-lyrical-mola-common, ros-lyrical-mola-imu-preintegration, ros-lyrical-mrpt-libbase, ros-lyrical-mrpt-libgui, ros-lyrical-mrpt-libmaps, ros-lyrical-mrpt-libobs, ros-lyrical-mrpt-libposes, ros-lyrical-mrpt-libtclap, ros-lyrical-ros-environment, ros-lyrical-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-mp2p-icp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libtbb-dev, ros-lyrical-mola-common, ros-lyrical-mola-imu-preintegration, ros-lyrical-mrpt-libbase, ros-lyrical-mrpt-libgui, ros-lyrical-mrpt-libmaps, ros-lyrical-mrpt-libobs, ros-lyrical-mrpt-libposes, ros-lyrical-mrpt-libtclap, ros-lyrical-ros-workspace
+Description: A repertory of multi primitive-to-primitive (MP2P) ICP algorithms in C++
