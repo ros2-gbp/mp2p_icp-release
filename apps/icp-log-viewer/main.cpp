@@ -52,38 +52,43 @@ constexpr int         SMALL_FONT_SIZE    = 12;
 constexpr int         WINDOW_FIXED_WIDTH = 400;
 
 // =========== Declare supported cli switches ===========
-static TCLAP::CmdLine cmd(APP_NAME);
+namespace
+{
+TCLAP::CmdLine cmd(APP_NAME);
 
-static TCLAP::ValueArg<std::string> argExtension(
+TCLAP::ValueArg<std::string> argExtension(
     "e", "file-extension", "Filename extension to look for. Default is `icplog`", false, "icplog",
     "icplog", cmd);
 
-static TCLAP::ValueArg<std::string> argSearchDir(
+TCLAP::ValueArg<std::string> argSearchDir(
     "d", "directory", "Directory in which to search for *.icplog files.", false, ".", ".", cmd);
 
-static TCLAP::ValueArg<std::string> argSingleFile(
+TCLAP::ValueArg<std::string> argSingleFile(
     "f", "file", "Load just this one single log *.icplog file.", false, "log.icplog", "log.icplog",
     cmd);
 
-static TCLAP::ValueArg<std::string> arg_plugins(
+TCLAP::ValueArg<std::string> arg_plugins(
     "l", "load-plugins", "One or more (comma separated) *.so files to load as plugins", false,
     "foobar.so", "foobar.so", cmd);
 
-static TCLAP::ValueArg<double> argAutoPlayPeriod(
+TCLAP::ValueArg<double> argAutoPlayPeriod(
     "", "autoplay-period",
     "The period (in seconds) between timestamps to load and show in autoplay "
     "mode.",
     false, 0.1, "period [seconds]", cmd);
 
-static TCLAP::ValueArg<double> argMinQuality(
+TCLAP::ValueArg<double> argMinQuality(
     "q", "min-quality",
     "Minimum ICP quality (range [0,1], i.e. 0%-100%) to load a log file. "
     "Files whose ICP result quality is below this threshold are skipped.",
     false, 0.0, "quality [0,1]", cmd);
+}  // namespace
 
 // =========== Declare global variables ===========
 #if MRPT_HAS_NANOGUI
 
+namespace
+{
 auto                              glVizICP = mrpt::opengl::CSetOfObjects::Create();
 mrpt::gui::CDisplayWindowGUI::Ptr win;
 
@@ -115,8 +120,11 @@ nanogui::CheckBox* cbViewPairings_pt2pl   = nullptr;
 nanogui::CheckBox* cbViewPairings_pt2ln   = nullptr;
 nanogui::CheckBox* cbViewPairings_cov2cov = nullptr;
 
+nanogui::CheckBox* cbViewPriorEllipsoid = nullptr;
+
 nanogui::TextBox *tbLogPose = nullptr, *tbInitialGuess = nullptr, *tbInit2Final = nullptr,
-                 *tbCovariance = nullptr, *tbConditionNumber = nullptr, *tbPairings = nullptr;
+                 *tbCovariance = nullptr, *tbConditionNumber = nullptr, *tbPairings = nullptr,
+                 *tbPriorMean = nullptr, *tbPriorInfo = nullptr;
 
 nanogui::Slider* slPairingsPl2PlSize         = nullptr;
 nanogui::Slider* slPairingsPl2LnSize         = nullptr;
@@ -148,8 +156,12 @@ class DelayedLoadLog
     {
         if (!log_)
         {
-            // Load now:
-            log_ = mp2p_icp::LogRecord::LoadFromFile(filename_);
+            log_.emplace();
+            if (!log_->load_from_file(filename_))
+            {
+                log_.reset();
+                THROW_EXCEPTION_FMT("Failed to load log file: '%s'", filename_.c_str());
+            }
         }
 
         return log_.value();
@@ -167,7 +179,9 @@ class DelayedLoadLog
 
 std::vector<DelayedLoadLog> logRecords;
 
-static void rebuild_3d_view(bool regenerateMaps = true);
+}  // namespace
+
+void rebuild_3d_view(bool regenerateMaps = true);
 
 namespace
 {
@@ -467,7 +481,7 @@ void main_show_gui()
     tbInit2Final->setEditable(false);
     tab1->add<nanogui::Label>(" ")->setFontSize(SMALL_FONT_SIZE);
 
-    tab1->add<nanogui::Label>("Uncertainty: diagonal sigmas (x y z yaw pitch roll)")
+    tab1->add<nanogui::Label>("Uncertainty: diagonal sigmas (x y z [m] yaw pitch roll [deg])")
         ->setFontSize(MID_FONT_SIZE);
     tbCovariance = tab1->add<nanogui::TextBox>();
     tbCovariance->setFontSize(MID_FONT_SIZE);
@@ -509,6 +523,21 @@ void main_show_gui()
     tbInitialGuess->setFontSize(14);
     tbInitialGuess->setEditable(true);
     tbInitialGuess->setAlignment(nanogui::TextBox::Alignment::Left);
+    tab1->add<nanogui::Label>(" ")->setFontSize(SMALL_FONT_SIZE);
+
+    tab1->add<nanogui::Label>("Prior mean pose (if any):")->setFontSize(MID_FONT_SIZE);
+    tbPriorMean = tab1->add<nanogui::TextBox>();
+    tbPriorMean->setFontSize(MID_FONT_SIZE);
+    tbPriorMean->setEditable(false);
+    tbPriorMean->setAlignment(nanogui::TextBox::Alignment::Left);
+
+    tab1->add<nanogui::Label>("Prior: diagonal sigmas (x y z [m] yaw pitch roll [deg])")
+        ->setFontSize(MID_FONT_SIZE);
+    tbPriorInfo = tab1->add<nanogui::TextBox>();
+    tbPriorInfo->setFontSize(MID_FONT_SIZE);
+    tbPriorInfo->setEditable(false);
+    tbPriorInfo->setAlignment(nanogui::TextBox::Alignment::Left);
+    tab1->add<nanogui::Label>(" ")->setFontSize(SMALL_FONT_SIZE);
 
     // Save map buttons:
     auto lambdaSave = [&](const mp2p_icp::metric_map_t& m)
@@ -726,6 +755,10 @@ void main_show_gui()
     cbColorizeGlobalMap = tab5->add<nanogui::CheckBox>("Recolorize global map");
     cbColorizeGlobalMap->setCallback([&](bool) { rebuild_3d_view(); });
 
+    cbViewPriorEllipsoid = tab5->add<nanogui::CheckBox>("View prior ellipsoid");
+    cbViewPriorEllipsoid->setChecked(true);
+    cbViewPriorEllipsoid->setCallback([&](bool) { rebuild_3d_view(); });
+
     // ----
     w->add<nanogui::Label>(" ");  // separator
     w->add<nanogui::Button>("Quit", ENTYPO_ICON_ARROW_BOLD_LEFT)
@@ -817,6 +850,7 @@ void main_show_gui()
         LOAD_CB_STATE(cbViewPairings_pt2pl);
         LOAD_CB_STATE(cbViewPairings_pt2ln);
         LOAD_CB_STATE(cbViewPairings_cov2cov);
+        LOAD_CB_STATE(cbViewPriorEllipsoid);
 
         LOAD_SL_STATE(slPairingsPl2PlSize);
         LOAD_SL_STATE(slPairingsPl2LnSize);
@@ -850,6 +884,7 @@ void main_show_gui()
         SAVE_CB_STATE(cbViewPairings_cov2cov);
         SAVE_CB_STATE(cbViewPairings_pt2pl);
         SAVE_CB_STATE(cbViewPairings_pt2ln);
+        SAVE_CB_STATE(cbViewPriorEllipsoid);
 
         SAVE_SL_STATE(slPairingsPl2PlSize);
         SAVE_SL_STATE(slPairingsPl2LnSize);
@@ -907,6 +942,7 @@ double conditionNumber(const MATRIX& m)
 // rebuild_3d_view
 // ==============================
 void rebuild_3d_view(bool regenerateMaps)
+try
 {
     using namespace std::string_literals;
 
@@ -960,6 +996,33 @@ void rebuild_3d_view(bool regenerateMaps)
     lbICPStats[4]->setValue("Local: "s + lr.pcLocal->contents_summary());
 
     tbInitialGuess->setValue(lr.initialGuessLocalWrtGlobal.asString());
+
+    // Prior:
+    if (lr.prior.has_value())
+    {
+        tbPriorMean->setValue(lr.prior->mean.asString());
+
+        std::string s;
+        const auto  cov = mrpt::math::CMatrixDouble66(lr.prior->cov_inv.inverse());
+        for (int i = 0; i < 6; i++)
+        {
+            const auto sigma = std::sqrt(cov(i, i));
+            if (i < 3)
+            {
+                s += mrpt::format("%.02fm ", sigma);
+            }
+            else
+            {
+                s += mrpt::format("%.02fd ", mrpt::RAD2DEG(sigma));
+            }
+        }
+        tbPriorInfo->setValue(s);
+    }
+    else
+    {
+        tbPriorMean->setValue("(none)");
+        tbPriorInfo->setValue("(none)");
+    }
 
     tbLogPose->setValue(lr.icpResult.optimal_tf.mean.asString());
 
@@ -1049,7 +1112,15 @@ void rebuild_3d_view(bool regenerateMaps)
         std::string s;
         for (int i = 0; i < 6; i++)
         {
-            s += mrpt::format("%.02f ", std::sqrt(relativePose.cov(i, i)));
+            auto sigma = std::sqrt(relativePose.cov(i, i));
+            if (i < 3)
+            {
+                s += mrpt::format("%.02fm ", sigma);
+            }
+            else
+            {
+                s += mrpt::format("%.02fd ", mrpt::RAD2DEG(sigma));
+            }
         }
 
         s += mrpt::format(
@@ -1089,6 +1160,22 @@ void rebuild_3d_view(bool regenerateMaps)
     glCornerToCov->setCovMatrixAndMean(
         relativePose.cov.blockCopy<3, 3>(0, 0), relativePose.mean.asVectorVal().head<3>());
     glVizICP->insert(glCornerToCov);
+
+    // Prior ellipsoid (yellow, at prior mean, translational part only):
+    if (lr.prior.has_value() && cbViewPriorEllipsoid->checked())
+    {
+        const auto priorCov = mrpt::math::CMatrixDouble66(lr.prior->cov_inv.inverse());
+
+        auto glPriorEllipsoid = mrpt::opengl::CEllipsoid3D::Create();
+        glPriorEllipsoid->set3DsegmentsCount(16);
+        glPriorEllipsoid->enableDrawSolid3D(true);
+        glPriorEllipsoid->setColor_u8(0xff, 0xff, 0x00, 0x50);
+        glPriorEllipsoid->setCovMatrixAndMean(
+            priorCov.blockCopy<3, 3>(0, 0), lr.prior->mean.asVectorVal().head<3>());
+        glPriorEllipsoid->setName("Prior");
+        glPriorEllipsoid->enableShowName(true);
+        glVizICP->insert(glPriorEllipsoid);
+    }
 
     // GLOBAL PC:
     mp2p_icp::render_params_t rpGlobal;
@@ -1303,14 +1390,23 @@ void rebuild_3d_view(bool regenerateMaps)
         gl_view->insert(mrpt::opengl::stock_objects::CornerXYZ());
     }
 }
+catch (const std::exception& e)
+{
+    std::cerr << "[rebuild_3d_view] Exception: " << mrpt::exception_to_str(e) << std::endl;
+    if (lbICPStats[0])
+        lbICPStats[0]->setValue(std::string("ERROR: ") + mrpt::exception_to_str(e).substr(0, 80));
+}
 
 #else  // MRPT_HAS_NANOGUI
-static void main_show_gui()
+namespace
+{
+void main_show_gui()
 {
     THROW_EXCEPTION(
         "This application requires a version of MRPT built with nanogui "
         "support.");
 }
+}  // namespace
 
 #endif  // MRPT_HAS_NANOGUI
 
