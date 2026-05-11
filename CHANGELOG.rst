@@ -2,6 +2,67 @@
 Changelog for package mp2p_icp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.10.2 (2026-05-11)
+-------------------
+* Merge pull request `#65 <https://github.com/MOLAorg/mp2p_icp/issues/65>`_ from MOLAorg/simplify-ci
+  CI: simplify CI scripts and docker install
+* chore: don't use anymore map classes deprecated and to be removed in mrpt 3.0.0
+* fix: maps creating multiple CPointsCloud won't have all with pointSize honored
+* Merge pull request `#64 <https://github.com/MOLAorg/mp2p_icp/issues/64>`_ from MOLAorg/bump-cmake
+  bump min req cmake version to 3.22
+* CI: Use sensible names for jobs matrix
+* bump min req cmake version to 3.22
+* Contributors: Jose Luis Blanco-Claraco
+
+2.10.1 (2026-05-04)
+-------------------
+* FIX: sm2mm pipeline for keyframe maps need valid KF poses
+* FIX: copy/paste error in guard against missing layer
+* mm-viewer: UI now has an easier near/far clipping plane tool
+* chore: map contents as string made less verbose (hide full covariance)
+* Merge pull request `#63 <https://github.com/MOLAorg/mp2p_icp/issues/63>`_ from MOLAorg/feat/optional-final-run-quality-matchers
+  feat: optional last run of matchers with final ICP_ITERATION for adaptive thresholds to see final thresholds
+* feat: optional last run of matchers with final ICP_ITERATION for adaptive thresholds to see final thresholds
+* fix: wrong decimation applied in sm2mm filters
+* Merge pull request `#62 <https://github.com/MOLAorg/mp2p_icp/issues/62>`_ from MOLAorg/feat/prior-weight-mitigations
+  feat: Implement Birge-ratio auto-balance for cov2cov and prior weighting
+* feat: Implement Birge-ratio auto-balance for cov2cov and prior weighting
+* fix: icp-log-viewer didn't show the prior covariance at its correct location
+* Contributors: Jose Luis Blanco-Claraco
+
+2.10.0 (2026-05-02)
+-------------------
+* CI: Update actions for new ROS rolling
+* icp-log-viewer: better formatting of uncertainties
+* demo sm2mm file: store as independent keyframes
+* Merge pull request `#60 <https://github.com/MOLAorg/mp2p_icp/issues/60>`_ from MOLAorg/feat/censi3d-covariance
+  Feat: Censi3D covariance method
+* feat: Add new covariance method (Censi, 3D version)
+* demo sm2mm files: add Keyframe map variant
+* Contributors: Jose Luis Blanco-Claraco
+
+2.9.1 (2026-04-29)
+------------------
+* Merge pull request `#59 <https://github.com/MOLAorg/mp2p_icp/issues/59>`_ from MOLAorg/fix/cov2cov-covariance-whitening
+  Fix cov2cov whitening and add residual-variance scaling in covariance()
+* Fix cov2cov whitening and add residual-variance scaling in covariance()
+  The cov2cov branch in covariance.cpp whitened residuals with the full
+  information matrix (cov_inv * e), so the assembled Hessian became
+  J^T * cov_inv^2 * J instead of J^T * cov_inv * J. Combined with hundreds
+  of pairings this drove |cov| down to ~1e-20 and made the estimate
+  unusable.
+  - Use the Cholesky factor L^T (with L L^T = cov_inv) to whiten the
+  cov2cov residual, matching what optimal_tf_gauss_newton accumulates.
+  - Multiply the inverse-Hessian by chi^2 / (m - 6), the standard
+  a-posteriori unit-weight variance, to rescale the (otherwise
+  optimistic) result by the empirical residual level.
+* Merge pull request `#58 <https://github.com/MOLAorg/mp2p_icp/issues/58>`_ from MOLAorg/feat/icp-viewer-show-prior
+  feat: icp-logs now store the prior SE(3) PDF
+* feat: icp-logs now store the prior SE(3) PDF
+* icp-log-viewer: safer against exceptions in gui thread
+* demo sm2mm files: ignore_accelerometer=true in all deskew stages by default (prevent noisy maps from low-quality IMUs)
+* Contributors: Jose Luis Blanco-Claraco
+
 2.9.0 (2026-04-22)
 ------------------
 * Merge pull request `#57 <https://github.com/MOLAorg/mp2p_icp/issues/57>`_ from MOLAorg/feat/deskew-filter-ignore-acc
