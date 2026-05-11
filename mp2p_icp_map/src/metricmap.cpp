@@ -332,17 +332,28 @@ void metric_map_t::get_visualization_map_layer(
         // use its own default renderer:
         map->getVisualizationInto(o);
 
-        // apply the point size, if possible:
-        if (auto glPtsCol = o.getByClass<mrpt::opengl::CPointCloudColoured>(); glPtsCol)
+        // apply the point size to ALL point cloud objects (a map type such as
+        // KeyframePointCloudMap inserts one object per keyframe):
+        for (size_t ith = 0;; ith++)
         {
+            auto glPtsCol = o.getByClass<mrpt::opengl::CPointCloudColoured>(ith);
+            if (!glPtsCol)
+            {
+                break;
+            }
             glPtsCol->setPointSize(p.pointSize);
             if (p.force_alpha_channel)
             {
                 glPtsCol->setAllPointsAlpha(p.color.A);
             }
         }
-        else if (auto glPts = o.getByClass<mrpt::opengl::CPointCloud>(); glPts)
+        for (size_t ith = 0;; ith++)
         {
+            auto glPts = o.getByClass<mrpt::opengl::CPointCloud>(ith);
+            if (!glPts)
+            {
+                break;
+            }
             glPts->setPointSize(p.pointSize);
         }
 
@@ -552,7 +563,15 @@ std::string metric_map_t::contents_summary() const
             "georeferenced: "s + "lat="s + gc.lat.getAsString() + " lon="s + gc.lon.getAsString() +
             mrpt::format(" (%.09f  %.09f) ", gc.lat.getDecimalValue(), gc.lon.getDecimalValue()) +
             " h="s + std::to_string(gc.height) + " T_enu_map="s +
-            georeferencing->T_enu_to_map.asString();
+            georeferencing->T_enu_to_map.mean.asString();
+
+        const auto& cov = georeferencing->T_enu_to_map.cov;
+        ret += mrpt::format(
+            " std_x=%.03f std_y=%.03f std_z=%.03f std_yaw=%.02f deg std_pitch=%.02f "
+            "deg std_roll=%.02f deg\n",
+            std::sqrt(cov(0, 0)), std::sqrt(cov(1, 1)), std::sqrt(cov(2, 2)),
+            mrpt::RAD2DEG(std::sqrt(cov(3, 3))), mrpt::RAD2DEG(std::sqrt(cov(4, 4))),
+            mrpt::RAD2DEG(std::sqrt(cov(5, 5))));
     }
 
     if (empty())
