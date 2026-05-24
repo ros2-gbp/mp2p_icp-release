@@ -44,6 +44,7 @@ endfunction()
 
 if (mola_imu_preintegration_FOUND)
 mp2p_add_test(mp2p_deskew EXTRA_LIBS mp2p_icp_filters)
+mp2p_add_test(mp2p_deskew_empty_buffer EXTRA_LIBS mp2p_icp_filters)
 endif()
 
 #mp2p_add_test(mp2p_matcher_pt2pl)  # TODO: This now requires a NP metric map to run the test
@@ -96,4 +97,16 @@ mp2p_add_test(sm2mm_georef EXTRA_LIBS mp2p_icp_filters)
 
 if (mola_test_datasets_FOUND)
   mp2p_add_test(mp2p_quality_voxels)
+endif()
+
+# Optional end-to-end GICP pipeline benchmark. Requires mola_metric_maps
+# (for the mola::KeyframePointCloudMap class used by the GICP pipeline).
+find_package(mola_metric_maps QUIET)
+if (mola_metric_maps_FOUND)
+  mp2p_add_test(mp2p_gicp_pipeline_benchmark EXTRA_LIBS mp2p_icp_filters)
+  target_link_libraries(test-mp2p_gicp_pipeline_benchmark mola::mola_metric_maps)
+else()
+  message(STATUS
+    "mola_metric_maps not found: skipping test "
+    "'test-mp2p_gicp_pipeline_benchmark'.")
 endif()
