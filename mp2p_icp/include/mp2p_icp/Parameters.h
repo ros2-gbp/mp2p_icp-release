@@ -15,6 +15,7 @@
 #pragma once
 
 #include <mp2p_icp/WeightParameters.h>
+#include <mp2p_icp/covariance.h>
 #include <mrpt/containers/yaml.h>
 #include <mrpt/core/bits_math.h>  // DEG2RAD()
 #include <mrpt/serialization/CSerializable.h>
@@ -103,7 +104,19 @@ struct Parameters : public mrpt::serialization::CSerializable
      * at the prescribed iteration, ICP will be aborted. */
     std::map<uint32_t, double> quality_checkpoints = {{50U, 0.05}, {100U, 0.10}};
 
+    /** If true (default=false), a final matcher pass is run with ICP_ITERATION set to
+     *  maxIterations before evaluating quality. This ensures the quality score
+     *  reflects pairings at the final (tightest) threshold, regardless of how
+     *  early the solver converged. Set to false only to reproduce legacy
+     *  behavior. */
+    bool force_final_pairings_for_quality = false;
+
     /** @} */
+
+    /** Parameters for the post-optimization SE(3) covariance estimation
+     *  (see mp2p_icp::covariance). Loadable from the optional YAML map
+     *  block `covariance:` in the ICP pipeline file. */
+    CovarianceParameters covariance_params;
 
     void load_from(const mrpt::containers::yaml& p);
     void save_to(mrpt::containers::yaml& p) const;
