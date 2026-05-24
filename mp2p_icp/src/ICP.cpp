@@ -380,6 +380,27 @@ void ICP::align(
     // Quality:
     mrpt::system::CTimeLoggerEntry tle7(profiler_, "align.5_quality");
 
+    // If requested (default=false), re-run matchers at ICP_ITERATION=maxIterations
+    // so the pairings used for quality scoring reflect the final (tightest)
+    // threshold, regardless of how early the solver converged.
+    if (p.force_final_pairings_for_quality)
+    {
+        for (auto& obj : matchers_)
+        {
+            lambdaAddOwnParams(*obj);
+        }
+        for (auto ps : activeParamSouces)
+        {
+            ps->updateVariable("ICP_ITERATION", static_cast<double>(p.maxIterations));
+        }
+        lambdaRealizeParamSources();
+
+        MatchContext mc;
+        mc.icpIteration       = p.maxIterations;
+        state.currentPairings = run_matchers(
+            matchers_, state.pcGlobal, state.pcLocal, state.currentSolution.optimalPose, mc);
+    }
+
     for (auto& e : quality_evaluators_)
     {
         lambdaAddOwnParams(*e.obj);
@@ -397,11 +418,13 @@ void ICP::align(
     result.optimalScale    = state.currentSolution.optimalScale;
     result.finalPairings   = std::move(state.currentPairings);
 
-    // Covariance:
-    mp2p_icp::CovarianceParameters covParams;
+    // Covariance of the estimated SE(3) registration:
+    {
+        mrpt::system::CTimeLoggerEntry tleCov(profiler_, "align.5b_covariance");
 
-    result.optimal_tf.cov =
-        mp2p_icp::covariance(result.finalPairings, result.optimal_tf.mean, covParams);
+        result.optimal_tf.cov =
+            mp2p_icp::covariance(result.finalPairings, result.optimal_tf.mean, p.covariance_params);
+    }
 
     // Clean-up global map icp preparation:
     for (const auto& [layer, mmap] : pcGlobal.layers)
