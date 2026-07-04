@@ -5,10 +5,41 @@
 Point cloud **Filters** in ``mp2p_icp`` are used to modify or extract part of the information from an input point cloud.
 This can involve tasks like removing noise, downsampling, segmenting points into different layers based on properties
 (like intensity or curvature), or adjusting per-point attributes (like timestamps or intensity).
-All filters inherit from :cpp:class:`mp2p_icp_filters::FilterBase` and can be configured either programmatically 
+All filters inherit from :cpp:class:`mp2p_icp_filters::FilterBase` and can be configured either programmatically
 or via a YAML file using the **filter pipeline** API, e.g.
-:cpp:class:`mp2p_icp_filters::filter_pipeline_from_yaml()` 
+:cpp:class:`mp2p_icp_filters::filter_pipeline_from_yaml()`
 or :cpp:class:`mp2p_icp_filters::filter_pipeline_from_yaml_file()`.
+
+**Common parameters** (available on every filter):
+
+* **name** (:cpp:type:`std::string`, optional): A custom name for the filter, used in log output and profiler entries.
+
+* **enabled** (:cpp:type:`bool`, default: ``true``): When ``false``, the filter is silently skipped in
+  :cpp:func:`mp2p_icp_filters::apply_filter_pipeline`. Accepts ``true``/``false`` YAML booleans and
+  string values ``"1"``/``"0"`` (so that ``mola_yaml`` ``${ENV_VAR|1}`` expressions work transparently
+  for environment-based toggling):
+
+  .. code-block:: yaml
+
+      # Export MOLA_RANGE_ADAPTIVE_FILTER=1 in the shell to activate the new filter and
+      # deactivate the old one. Default (unset): old uniform filter is active.
+      filters:
+        - class_name: mp2p_icp_filters::FilterDecimateRangeAdaptive
+          params:
+            enabled: '${MOLA_RANGE_ADAPTIVE_FILTER|0}'  # off by default; set to "1" to enable
+            input_pointcloud_layer: 'raw'
+            output_pointcloud_layer: 'decimated'
+            bin_width: 1.0
+            min_voxel_size: 0.05
+            max_voxel_size: 2.0
+
+        - class_name: mp2p_icp_filters::FilterDecimateVoxels
+          params:
+            enabled: '$(test "${MOLA_RANGE_ADAPTIVE_FILTER:-0}" = "1" && echo 0 || echo 1)'
+            input_pointcloud_layer: 'raw'
+            output_pointcloud_layer: 'decimated'
+            voxel_filter_resolution: 0.2
+            decimate_method: 'DecimateMethod::VoxelAverage'
 
 .. note::
 
@@ -399,6 +430,72 @@ Filter: `FilterDecimateAdaptive`
 
 .. image:: decimate_adaptive_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDecimateAdaptive
+
+|
+
+---
+
+Filter: `FilterDecimateRangeAdaptive`
+--------------------------------------
+
+**Description**: Range-adaptive voxel decimation following EllipseLIO (arXiv:2605.21150, Eqs. 1-3).
+The input cloud is split into radial bins of width ``bin_width`` meters. Within bin ``i`` (points
+at distance ``[i, i+1) * bin_width`` from the sensor), the voxel size is set to the estimated
+scan-line separation at that range:
+
+.. math::
+
+   v_i = \mathrm{clamp}\!\left(\frac{(i+1)\cdot\theta}{\beta-1},\; v_{\min},\; v_{\max}\right)
+
+where :math:`\theta` is the vertical field-of-view (rad) and :math:`\beta` is the number of scan
+lines.  Each bin is independently voxelised (first point per voxel), and the outputs are unioned.
+
+Effect: near surfaces are kept at high density while distant points are aggressively decimated,
+retaining geometric fidelity across scale and preventing divergence of ICP on large-scale scenes.
+
+**Auto-derivation**: When ``vertical_fov_rad`` or ``num_scan_lines`` are set to 0, they are
+automatically estimated from the ``ring`` channel of the input cloud (if present).  This lets a
+single YAML config work across heterogeneous LiDAR sensors without retuning.
+
+**Parameters**:
+
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): Input point cloud layer.
+
+* **output\_pointcloud\_layer** (:cpp:type:`std::string`): Output layer for the decimated cloud.
+
+* **vertical\_fov\_rad** (:cpp:type:`double`, default: `0`): LiDAR vertical field-of-view in
+  radians. If 0, auto-derived from the elevation spread of points carrying a ``ring`` channel.
+
+* **num\_scan\_lines** (:cpp:type:`unsigned int`, default: `0`): Number of scan lines (rings).
+  If 0, auto-derived as ``max(ring_id) + 1`` from the cloud's ring channel.
+
+* **bin\_width** (:cpp:type:`double`, default: `1.0`): Radial bin width in meters.
+
+* **max\_range** (:cpp:type:`double`, default: `0`): Maximum range (m). 0 means use the farthest
+  point in the cloud.
+
+* **min\_voxel\_size** (:cpp:type:`double`, default: `0.05`): Minimum voxel size clamp (m).
+
+* **max\_voxel\_size** (:cpp:type:`double`, default: `2.0`): Maximum voxel size clamp (m).
+
+* **min\_input\_points\_per\_voxel** (:cpp:type:`unsigned int`, default: `1`): Minimum number of
+  points a voxel must contain to produce an output point.
+
+* **parallelization\_grain\_size** (:cpp:type:`size\_t`, default: `16384`): TBB grain size.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterDecimateRangeAdaptive
+        params:
+          input_pointcloud_layer: 'raw'
+          output_pointcloud_layer: 'decimated'
+          vertical_fov_rad: 0        # auto from rings
+          num_scan_lines: 0          # auto from ring channel
+          bin_width: 1.0
+          min_voxel_size: 0.05
+          max_voxel_size: 2.0
 
 |
 
@@ -826,6 +923,42 @@ This is done by analyzing the min/max Z-span in 2D grid cells.
 
 .. image:: pole_detector_example.png
    :alt: Screenshot showing point cloud before and after applying FilterPoleDetector
+
+|
+
+---
+
+Filter: `FilterPolygon2D`
+-------------------------
+
+**Description**: Splits a point cloud into points **inside** and **outside** an arbitrary 2D polygon (defined in the XY plane), optionally further constrained by a Z range. Unlike :cpp:class:`FilterBoundingBox`, the cropping region can be a general (possibly non-convex) polygon, which is useful to match footprints that are not axis-aligned rectangles.
+
+**Parameters**:
+
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The input point cloud layer name.
+
+* **inside\_pointcloud\_layer** (:cpp:type:`std::string`, optional): The output layer name for points **INSIDE** the polygon. If empty, these points are discarded.
+
+* **outside\_pointcloud\_layer** (:cpp:type:`std::string`, optional): The output layer name for points **OUTSIDE** the polygon. If empty, these points are discarded.
+
+* **polygon** (:cpp:type:`float[][2]`): The list of polygon vertices in the XY plane, as a sequence of :math:`[x, y]` pairs. At least 3 vertices are required.
+
+* **z\_min** (:cpp:type:`double`, default: :math:`-\infty`): Minimum :math:`z` (inclusive) kept for points inside the polygon footprint.
+
+* **z\_max** (:cpp:type:`double`, default: :math:`+\infty`): Maximum :math:`z` (inclusive) kept for points inside the polygon footprint.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterPolygon2D
+        params:
+          input_pointcloud_layer: 'raw'
+          inside_pointcloud_layer: 'inside'
+          outside_pointcloud_layer: 'outside'
+          polygon: [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]
+          z_min: 0.3
+          z_max: 2.0
 
 |
 
