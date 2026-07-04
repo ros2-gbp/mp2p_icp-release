@@ -150,7 +150,7 @@ filters:
       range_max: 50.0
 ```
 
-Key filter categories: decimation, outlier removal, range/ring/intensity gating, deskew, edge/plane extraction, layer management.
+Key filter categories: decimation (including range-adaptive EllipseLIO-style), outlier removal, range/ring/intensity gating, deskew, edge/plane extraction, layer management.
 
 ---
 
@@ -204,6 +204,17 @@ Tests use gtest. Each filter, matcher, solver, and serializer has its own test f
 - Coordinate frame naming: `T_A_to_B` = pose of {B} as seen from {A}; `composePoint` transforms FROM the local (B) frame TO the reference (A) frame
 - Don't use long hyphens. Use American spelling.
 - Don't use static, prefer anynomous namespaces.
+
+---
+
+## Update rules
+
+- Use American spelling, do not use en/em dashes, don't sign commits as an AI agent.
+- Honor clang-format-14 and clang-tidy; in particular, don't declare multiple variables 
+  in the same line, prefer "if (x) {\n ...;\n }" to single line statements.
+- If you update or create a new `mp2p_icp_filters` class, keep it in synch with `docs/source/mp2p_icp_filters.rst` and 
+  with `~/code/mp2p-pipeline-editor-sources` if it exists (read its `README.md` file).
+
 
 ---
 
