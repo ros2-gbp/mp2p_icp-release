@@ -1,0 +1,13 @@
+Source: ros-humble-mp2p-icp-viz
+Section: misc
+Priority: optional
+Maintainer: "Jose-Luis Blanco-Claraco" <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, libcli11-dev, ros-humble-mola-common, ros-humble-mp2p-icp-core, ros-humble-mrpt-libgui, ros-humble-ros-environment, ros-humble-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-humble-mp2p-icp-viz
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libcli11-dev, ros-humble-mola-common, ros-humble-mp2p-icp-core, ros-humble-mrpt-libgui, ros-humble-ros-workspace
+Description: GUI applications for mp2p_icp: mm-viewer (interactive *.mm map viewer) and icp-log-viewer (ICP log inspector).
+ Kept in a separate package from mp2p_icp_core so headless consumers don't need to pull in mrpt_libgui.
