@@ -1,3 +1,29 @@
+## mp2p_icp (lyrical) - 2.12.0-1
+
+The packages in the `mp2p_icp` repository were released into the `lyrical` distro by running `/home/jlblanco/code/bloom-venv/bin/bloom-release -y -r lyrical mp2p_icp` on `Fri, 10 Jul 2026 09:31:34 -0000`
+
+These packages were released:
+- `mp2p_icp`
+- `mp2p_icp_core`
+- `mp2p_icp_viz`
+
+Version of package(s) in repository `mp2p_icp`:
+
+- upstream repository: https://github.com/MOLAorg/mp2p_icp.git
+- release repository: https://github.com/ros2-gbp/mp2p_icp-release.git
+- rosdistro version: `2.11.0-1`
+- old version: `2.11.0-1`
+- new version: `2.12.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.3`
+- catkin_pkg version: `0.5.2`
+- rosdep version: `0.22.2`
+- rosdistro version: `0.9.0`
+- vcstools version: `0.1.42`
+
+
 ## mp2p_icp (kilted) - 2.12.0-1
 
 The packages in the `mp2p_icp` repository were released into the `kilted` distro by running `/home/jlblanco/code/bloom-venv/bin/bloom-release -y -r kilted mp2p_icp` on `Fri, 10 Jul 2026 09:30:02 -0000`
