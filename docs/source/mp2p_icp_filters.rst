@@ -323,6 +323,8 @@ Useful for edge extraction (LOAM-style).
 
 * **max\_gap** (:cpp:type:`float`, default: `1.00f`): The maximum gap distance between a point and its neighbor (m).
 
+The three numeric parameters above accept dynamic formulas, e.g. `"0.02*ESTIMATED_OBSERVATION_RADIUS"`.
+
 .. code-block:: yaml
 
     filters:
@@ -401,6 +403,8 @@ Filter: `FilterDecimateAdaptive`
 
 **Description**: Accepts an input point cloud, voxelizes it, and generates a new layer with an adaptive sampling to aim for a specific desired output point count.
 
+More than one output layer can be requested, each one with its own target point count (see `outputs` below). All of them are then sampled from one single voxelization pass, which is the dominant cost, instead of chaining several instances of this filter.
+
 **Parameters**:
 
 * **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The input point cloud layer name.
@@ -409,9 +413,13 @@ Filter: `FilterDecimateAdaptive`
 
 * **desired\_output\_point\_count** (:cpp:type:`unsigned int`, default: `1000`): The target number of points in the output cloud.
 
+* **outputs** (sequence, optional): A list of output layers, each entry holding its own `output_pointcloud_layer` and `desired_output_point_count`. Mutually exclusive with the two single-output parameters above.
+
 * **minimum\_input\_points\_per\_voxel** (:cpp:type:`unsigned int`, default: `1`): Voxels with fewer points than this threshold will not generate any output point.
 
 * **voxel\_size** (:cpp:type:`float`, default: `0.10`): The size of the voxel grid used for downsampling (m).
+
+* **decimate\_method** (:cpp:enum:`mp2p_icp_filters::DecimateMethod`, default: `DecimateMethod::FirstPoint`): Which point represents each voxel, as in `FilterDecimateVoxels`_. Since this filter walks the voxels in as many rounds as needed to reach the desired point count, note that `DecimateMethod::FirstPoint` (the fastest) and `DecimateMethod::RandomPoint` take successive points out of each voxel, in insertion order or starting at a random offset, respectively; whereas `DecimateMethod::ClosestToAverage` and `DecimateMethod::VoxelAverage` summarize the whole voxel and hence yield **one point per voxel only**, so the output cannot be larger than the number of valid voxels. `DecimateMethod::VoxelAverage` generates new points, so per-point fields (intensity, ring, timestamp, ...) are not propagated to the output.
 
 * **parallelization\_grain\_size** (:cpp:type:`size\_t`, default: `16384`): Grain size for parallel processing of input clouds (used when TBB is enabled).
 
@@ -425,6 +433,22 @@ Filter: `FilterDecimateAdaptive`
           output_pointcloud_layer: 'adaptively_decimated'
           desired_output_point_count: 5000
           voxel_size: 0.2
+
+And the multiple-outputs form, e.g. to obtain a denser cloud to feed a local map and a sparser one to feed ICP:
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterDecimateAdaptive
+        params:
+          input_pointcloud_layer: 'raw'
+          voxel_size: 0.15
+          outputs:
+            - output_pointcloud_layer: 'decimated_for_map'
+              desired_output_point_count: 10000
+            - output_pointcloud_layer: 'decimated_for_icp'
+              desired_output_point_count: 3000
 
 .. rubric:: Before → After Screenshot
 
@@ -1122,6 +1146,40 @@ the overall structure of the point cloud.
 * For point clouds with more uniform noise, try increasing ``std_dev_mul`` to ``2.0`` or ``3.0`` to be more conservative.
 * Adjust ``mean_k`` based on local point density: higher values for denser clouds, lower values for sparser ones.
 * If you only need the cleaned point cloud, specify only ``output_layer_inliers`` and leave ``output_layer_outliers`` empty.
+
+|
+
+---
+
+Filter: `FilterTransformPointCloud`
+------------------------------------
+
+**Description**: Rigidly transforms an input point cloud layer into a **new** output layer, replacing each point :math:`p_i` by :math:`p'_i = T \oplus p_i` (pose compounding operator), where :math:`T` is `pose`, or its inverse if `invert_pose` is `true`. View-direction unit vector fields (``view_x``/``view_y``/``view_z``), if present, are rotated accordingly.
+
+Unlike `FilterMerge`_, this does not insert into an existing metric map: it always (re)creates a plain point-cloud layer of the same class as the input, so it composes with any other filter that takes a point-cloud layer as input (e.g. `FilterDecimateAdaptive`_).
+
+Typical use case: some odometry systems voxelize incoming scans *after* transforming them into the (approximately known, e.g. from a motion-model prior) global/map frame, so voxel membership is anchored to the map rather than to the vehicle's instantaneous local frame. This filter lets a pipeline replicate that: transform local→global with ``invert_pose: false``, run a decimation filter, then transform back with ``invert_pose: true`` and the *same* `pose` so the rest of the pipeline is unaffected.
+
+**Parameters**:
+
+* **input_pointcloud_layer** (:cpp:type:`std::string`): The point cloud layer to be transformed.
+
+* **output_pointcloud_layer** (:cpp:type:`std::string`): The destination layer for the transformed points. Must be different from `input_pointcloud_layer` (this filter does not transform a layer in place).
+
+* **pose** (:cpp:type:`mrpt::math::TPose3D`): The pose :math:`T` to apply.
+
+* **invert_pose** (:cpp:type:`bool`, default: `false`): If `true`, apply :math:`T^{-1}` instead of :math:`T`.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterTransformPointCloud
+        params:
+          input_pointcloud_layer: 'deskewed'
+          output_pointcloud_layer: 'deskewed_world'
+          pose: [robot_x, robot_y, robot_z, robot_yaw, robot_pitch, robot_roll]
+          invert_pose: false
 
 |
 
