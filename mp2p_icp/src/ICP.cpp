@@ -38,7 +38,8 @@ void ICP::align(
     const metric_map_t& pcLocal, const metric_map_t& pcGlobal,
     const mrpt::math::TPose3D& initialGuessLocalWrtGlobal, const Parameters& p, Results& result,
     const std::optional<mrpt::poses::CPose3DPDFGaussianInf>& prior,
-    const mrpt::optional_ref<LogRecord>&                     outputDebugInfo)
+    const mrpt::optional_ref<LogRecord>&                     outputDebugInfo,
+    const std::optional<GravityPrior>&                       gravityPrior)
 {
     using namespace std::string_literals;
 
@@ -76,6 +77,7 @@ void ICP::align(
         currentLog->pcLocal                    = pcLocal.get_shared_from_this_or_clone();
         currentLog->initialGuessLocalWrtGlobal = initialGuessLocalWrtGlobal;
         currentLog->prior                      = prior;
+        currentLog->gravityPrior               = gravityPrior;
         currentLog->icpParameters              = p;
     }
 
@@ -165,7 +167,8 @@ void ICP::align(
     std::optional<mrpt::poses::CPose3D> prev2_solution;  // 2 steps ago
     std::optional<mrpt::poses::CPose3D> lastCorrection;
     SolverContext                       sc;
-    sc.prior = prior;
+    sc.prior        = prior;
+    sc.gravityPrior = gravityPrior;
 
     for (result.nIterations = 0; result.nIterations < p.maxIterations; result.nIterations++)
     {
@@ -566,9 +569,10 @@ void ICP::save_log_file(const LogRecord& log, const Parameters& p)
         filename = std::regex_replace(filename, std::regex(expr), value);
     }
 
-    // make sure directory exist:
+    // make sure directory exist (an empty baseDir means "current directory",
+    // which always exists: createDirectory("") would throw):
     const auto baseDir = mrpt::system::extractFileDirectory(filename);
-    if (!mrpt::system::directoryExists(baseDir))
+    if (!baseDir.empty() && !mrpt::system::directoryExists(baseDir))
     {
         const bool ok = mrpt::system::createDirectory(baseDir);
         if (!ok)
