@@ -152,6 +152,88 @@ metric_map_t (local) + metric_map_t (global) + CPose3D (initial guess)
 
 All components are `Parameterizable` — configured via YAML at runtime, loaded with `mp2p_icp::Parameters`.
 
+`Matcher_Cov2Cov`'s acceptance criteria live in `mp2p_icp::MatchingDistanceProfile`
+(`mp2p_icp_map/include/mp2p_icp/MatchingDistanceProfile.h`), passed to
+`NearestPointWithCovCapable::nn_search_cov2cov()`. It is implicitly constructible from a
+`float`, so a flat threshold stays the default and the fast path. Opt-in refinement: a
+logistic range-adaptive distance (`thresholdFar`/`thresholdKneeRange`/
+`thresholdTransitionWidth`). These are declared with `DECLARE_PARAMETER_OPT`, not
+`MCP_LOAD_OPT`, so they accept dynamic formulas such as `"3.0*ADAPTIVE_THRESHOLD_SIGMA"`;
+a static load would silently truncate the string at the first non-numeric character.
+
+`Matcher_NDT_Blend` is `Matcher_Point2Plane` with the `argmin` over candidate
+planes replaced by a likelihood-weighted blend, so that the residual varies
+continuously with the pose instead of jumping when the winning candidate
+changes. It reads candidates through `NearestPlaneCapable::nn_visit_pt2pl_candidates()`,
+whose default implementation just reports the single best match, so maps that
+expose only an `argmin` keep working. Three things about it are load-bearing
+and easy to undo by accident:
+
+- `temperature: 0` takes the plain `nn_search_pt2pl()` path, so it reproduces
+  `Matcher_Point2Plane` bit for bit. That exactness is the control the
+  temperature sweeps are read against.
+- The weight fades to zero, with zero derivative, at `searchRadius`. A hard
+  cutoff would put back the same discontinuity at the window edge.
+- Normals are accumulated as outer products, never as vectors. The
+  point-to-plane cost is invariant to a plane's normal sign, and this keeps the
+  blend invariant too; averaging normals directly would make the result depend
+  on each map cell's sign bookkeeping. The known cost is that two *exactly*
+  perpendicular candidates with *exactly* equal weight switch rather than
+  interpolate; any other angle is smooth. See `test-mp2p_matcher_ndt_blend`,
+  which asserts all of the above, including that last limitation.
+
+At `DEBUG` verbosity it also logs one `blendstats` line per layer match, with
+the mean number of candidates enumerated, the mean number carrying nonzero
+weight, and the mean inverse participation ratio (1 for a pure `argmin`, the
+candidate count when they contribute equally). This answers "is this actually
+blending anything, or is it an `argmin` over a restricted window" by
+measurement; the statistics are not collected at any other verbosity.
+
+`Matcher_Points_Blend` is the point-based counterpart: it replaces
+`Matcher_Points_DistanceThreshold`'s nearest-neighbor target with the
+distance-weighted mean of the map points in `searchRadius`, and emits the same
+`paired_pt2pt`. The same three properties are load-bearing:
+
+- `temperature: 0` runs the very same `nn_single_search()` query, so it
+  reproduces `Matcher_Points_DistanceThreshold` with `pairingsPerPoint: 1` bit
+  for bit, ties included.
+- The neighborhood is a **radius** query, never a fixed-k one: a map point
+  entering or leaving a top-k list is a harder flip than the one being removed,
+  since `k` is a count rather than a geometric boundary.
+- The weight fades to zero, with zero derivative, at `searchRadius`.
+
+Its blended target is not a map point, so `globalIdx` carries the nearest
+neighbor's index; that field drives the already-paired bookkeeping.
+`errorSquareAfterTransformation` carries the blended residual, since
+`QualityEvaluator_PairedRatio` feeds it to the `adaptive_threshold` controller.
+The formulation has one intrinsic cost: a weighted mean of surface points is
+pulled toward the interior of the neighborhood, so at a temperature comparable
+to the map's point spacing the target leaves the surface. See
+`test-mp2p_matcher_points_blend`, which asserts that too.
+
+`Matcher_Points_KnnPlane` goes the opposite way from the two blend matchers and
+is deliberately the least smooth correspondence rule here: `knn` nearest map
+points, a least-squares plane through them, and three hard gates
+(`maxNeighborDistance`, `planeFitMaxDeviation`, and a residual gate scaled by
+the square root of the point's own range). It emits `paired_pt2pl`, so
+`Solver_GaussNewton` is unchanged. Defaults reproduce Fast-LIO2's constants.
+
+Two things about it are load-bearing:
+
+- The plane is fitted by solving `A x = -1` with a **column-pivoting Householder
+  QR in single precision**, not by an eigen/PCA fit. The two are not
+  numerically the same and differ in kind on near-degenerate neighborhoods, and
+  this matcher exists to reproduce a protocol faithfully.
+- Every gate is a constant or a function of a static property of the
+  measurement. None reads back the registration's own quality, which is what
+  distinguishes it from the `adaptive_threshold`-driven shipped matchers.
+
+Ships as its own pipeline (`lidar3d-fastlio-matching.yaml`) with the controller
+disabled; the default pipeline is untouched. Note that swapping it in for
+`Matcher_Cov2Cov` also changes what the Censi3D covariance estimate and the
+Birge-ratio prior balancing consume, so it is a residual-model change as well as
+a protocol one. See `test-mp2p_matcher_knn_plane`.
+
 ---
 
 ## Filter pipeline
@@ -170,6 +252,26 @@ filters:
 ```
 
 Key filter categories: decimation (including range-adaptive EllipseLIO-style), outlier removal, range/ring/intensity gating, deskew, edge/plane extraction, layer management.
+
+`FilterDecimateAdaptive` accepts either the single-output keys (`output_pointcloud_layer` +
+`desired_output_point_count`) or an `outputs` sequence of several such pairs. In the latter case all
+output layers are sampled from ONE voxelization pass (the dominant cost), each with its own stride,
+which is what lets a consumer get a dense cloud for its local map and a sparse one for ICP without
+paying for two full passes. Measured on `test-mp2p_gicp_pipeline_benchmark`
+(`MP2P_BENCH_SINGLE_DECIMATION=1` selects the single-pass variant there), this saves ~2 ms per
+100k-point scan out of ~15 ms of 1st-pass filtering. Consumer side:
+`mola_lidar_odometry/pipelines/lidar3d-gicp-single-filter.yaml`.
+
+It also honors `decimate_method` (the `DecimateMethod` enum, now in its own header
+`mp2p_icp_filters/DecimateMethod.h`, shared with `FilterDecimateVoxels`). Because this filter
+revisits voxels in several rounds until the point count is met, `FirstPoint`/`RandomPoint` take
+successive points out of each voxel, while `ClosestToAverage`/`VoxelAverage` summarize the voxel and
+so emit at most one point per voxel (output capped at the voxel count); `VoxelAverage` synthesizes
+points, so per-point fields are not propagated.
+
+### Standalone point cloud utilities (not `Filter` subclasses)
+
+- `mp2p_icp_filters::robust_max_range()` (`PointCloudRobustRange.h`) — a percentile (default 0.95) of the per-point range, instead of the raw maximum, so a small minority of far outlier returns (observed on Livox sensors: specular-reflection artifacts hundreds of meters away in an otherwise small scene) cannot dominate an observation-radius estimate the way `boundingBox().max.norm()` does. `O(n)` average via `std::nth_element`. Not yet wired into any consumer (`mola_lidar_odometry`'s `ESTIMATED_OBSERVATION_RADIUS`, `icp_benchmark`'s `Bench::processScan`) — both currently compute their own unfiltered bounding-box max, which is exactly the vulnerability this function exists to fix; see `test-mp2p_PointCloudRobustRange.cpp`.
 
 ---
 
@@ -230,6 +332,13 @@ Tests use gtest. Each filter, matcher, solver, and serializer has its own test f
 - Implementations in `<module>/src/`
 - All classes registered with MRPT's RTTI: `DEFINE_MRPT_OBJECT` / `IMPLEMENTS_MRPT_OBJECT`
 - Parameters follow the `Parameterizable` interface: `initialize(mrpt::containers::yaml)`
+- Load numeric parameters that users may want to write as a formula (distances, thresholds,
+  radii, kernel scales) with `DECLARE_PARAMETER_{REQ,OPT}` / `DECLARE_PARAMETER_IN_{REQ,OPT}`,
+  never with `MCP_LOAD_{REQ,OPT}`: the latter is a static YAML read that silently truncates
+  an expression such as `"2.0*ADAPTIVE_THRESHOLD_SIGMA"` at its first non-numeric character.
+  `MCP_LOAD_*` is still correct for strings, enums, booleans, counts, and numeric parameters
+  intentionally kept static (dimensionless ratios, statistical criteria) — the distinction is
+  whether a formula is plausible for that parameter, not whether it happens to be numeric.
 - Always use braces `{}` for all `if`/`for`/`while` blocks
 - Coordinate frame naming: `T_A_to_B` = pose of {B} as seen from {A}; `composePoint` transforms FROM the local (B) frame TO the reference (A) frame
 - Don't use long hyphens. Use American spelling.

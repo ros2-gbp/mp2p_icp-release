@@ -7,15 +7,19 @@ set(lib_name mp2p_icp) # we cannot use PROJECT_NAME here, since catkin requires 
 set(LIB_SRCS
   src/covariance.cpp
   src/errorTerms.cpp
+  src/GravityPrior.cpp
   src/icp_pipeline_from_yaml.cpp
   src/ICP.cpp
   src/LogRecord.cpp
   src/Matcher_Adaptive.cpp
   src/Matcher_Cov2Cov.cpp
   src/Matcher_Point2Line.cpp
+  src/Matcher_NDT_Blend.cpp
   src/Matcher_Point2Plane.cpp
   src/Matcher_Points_Base.cpp
+  src/Matcher_Points_Blend.cpp
   src/Matcher_Points_DistanceThreshold.cpp
+  src/Matcher_Points_KnnPlane.cpp
   src/Matcher_Points_InlierRatio.cpp
   src/Matcher.cpp
   src/optimal_tf_gauss_newton.cpp
@@ -49,9 +53,12 @@ set(LIB_PUBLIC_HDRS
   include/mp2p_icp/Matcher_Adaptive.h
   include/mp2p_icp/Matcher_Cov2Cov.h
   include/mp2p_icp/Matcher_Point2Line.h
+  include/mp2p_icp/Matcher_NDT_Blend.h
   include/mp2p_icp/Matcher_Point2Plane.h
   include/mp2p_icp/Matcher_Points_Base.h
+  include/mp2p_icp/Matcher_Points_Blend.h
   include/mp2p_icp/Matcher_Points_DistanceThreshold.h
+  include/mp2p_icp/Matcher_Points_KnnPlane.h
   include/mp2p_icp/Matcher_Points_InlierRatio.h
   include/mp2p_icp/Matcher.h
   include/mp2p_icp/optimal_tf_gauss_newton.h
