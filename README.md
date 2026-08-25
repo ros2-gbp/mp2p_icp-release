@@ -1,3 +1,29 @@
+## mp2p_icp (jazzy) - 2.13.1-1
+
+The packages in the `mp2p_icp` repository were released into the `jazzy` distro by running `/mnt/linux/home/jlblanco/code/bloom-venv/bin/bloom-release -y -r jazzy mp2p_icp` on `Tue, 25 Aug 2026 20:59:35 -0000`
+
+These packages were released:
+- `mp2p_icp`
+- `mp2p_icp_core`
+- `mp2p_icp_viz`
+
+Version of package(s) in repository `mp2p_icp`:
+
+- upstream repository: https://github.com/MOLAorg/mp2p_icp.git
+- release repository: https://github.com/ros2-gbp/mp2p_icp-release.git
+- rosdistro version: `2.13.0-1`
+- old version: `2.13.0-1`
+- new version: `2.13.1-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.3`
+- catkin_pkg version: `1.1.0`
+- rosdep version: `0.26.0`
+- rosdistro version: `1.0.1`
+- vcstools version: `0.1.42`
+
+
 ## mp2p_icp (humble) - 2.13.1-1
 
 The packages in the `mp2p_icp` repository were released into the `humble` distro by running `/mnt/linux/home/jlblanco/code/bloom-venv/bin/bloom-release -y -r humble mp2p_icp` on `Tue, 25 Aug 2026 20:57:18 -0000`
