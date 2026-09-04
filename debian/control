@@ -1,0 +1,13 @@
+Source: ros-lyrical-mp2p-icp-core
+Section: misc
+Priority: optional
+Maintainer: "Jose-Luis Blanco-Claraco" <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, libcli11-dev, libtbb-dev, ros-lyrical-mola-common, ros-lyrical-mola-imu-preintegration, ros-lyrical-mrpt-libbase, ros-lyrical-mrpt-libmaps, ros-lyrical-mrpt-libobs, ros-lyrical-mrpt-libposes, ros-lyrical-ros-environment, ros-lyrical-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-mp2p-icp-core
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libcli11-dev, libtbb-dev, ros-lyrical-mola-common, ros-lyrical-mola-imu-preintegration, ros-lyrical-mrpt-libbase, ros-lyrical-mrpt-libmaps, ros-lyrical-mrpt-libobs, ros-lyrical-mrpt-libposes, ros-lyrical-ros-workspace
+Description: C++ libraries for multi primitive-to-primitive (MP2P) ICP algorithms and point cloud processing pipelines, plus headless CLI applications.
+ No GUI/display dependencies; see mp2p_icp_viz for the GUI apps.
