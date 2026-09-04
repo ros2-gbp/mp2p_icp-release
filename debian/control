@@ -1,0 +1,12 @@
+Source: ros-lyrical-mp2p-icp
+Section: misc
+Priority: optional
+Maintainer: "Jose-Luis Blanco-Claraco" <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, ros-lyrical-mp2p-icp-core, ros-lyrical-mp2p-icp-viz, ros-lyrical-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-mp2p-icp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-mp2p-icp-core, ros-lyrical-mp2p-icp-viz, ros-lyrical-ros-workspace
+Description: Metapackage for mp2p_icp: depends on mp2p_icp_core (headless libraries and CLI applications) and mp2p_icp_viz (GUI applications).
