@@ -25,19 +25,13 @@
 #include <imgui_internal.h>  // DockBuilder* API (default docking layout)
 #include <imgui_stdlib.h>  // ImGui::InputText(std::string*)
 #include <mp2p_icp/pointcloud_sanity_check.h>
-#include <mrpt/config.h>
 #include <mrpt/config/CConfigFile.h>
 #include <mrpt/core/round.h>
+#include <mrpt/img/TPixelCoord.h>
 #include <mrpt/io/CCompressedInputStream.h>
 #include <mrpt/math/TObject3D.h>
 #include <mrpt/math/geometry.h>
-#include <mrpt/opengl/CArrow.h>
-#include <mrpt/opengl/CGridPlaneXY.h>
-#include <mrpt/opengl/COpenGLScene.h>
-#include <mrpt/opengl/CPointCloudColoured.h>
-#include <mrpt/opengl/CSetOfLines.h>
-#include <mrpt/opengl/CText.h>
-#include <mrpt/opengl/stock_objects.h>
+#include <mrpt/opengl/CFBORender.h>
 #include <mrpt/poses/CPose3DInterpolator.h>
 #include <mrpt/serialization/CArchive.h>
 #include <mrpt/system/filesystem.h>
@@ -45,6 +39,13 @@
 #include <mrpt/system/string_utils.h>  // unitsFormat()
 #include <mrpt/topography/conversions.h>
 #include <mrpt/version.h>
+#include <mrpt/viz/CArrow.h>
+#include <mrpt/viz/CGridPlaneXY.h>
+#include <mrpt/viz/CPointCloudColoured.h>
+#include <mrpt/viz/CSetOfLines.h>
+#include <mrpt/viz/CText.h>
+#include <mrpt/viz/Scene.h>
+#include <mrpt/viz/stock_objects.h>
 
 #include <CLI/CLI.hpp>
 #include <algorithm>
@@ -52,15 +53,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 #include "../libcfgpath/cfgpath.h"
+#include "CameraTravelling.h"
 
 namespace
 {
 constexpr const char* APP_NAME = "mm-viewer";
-
-constexpr float TRAVELING_ZOOM2ROLL = 1e-4f;
 
 // Small axis-corner gizmo viewports ("Map frame" / "ENU frame"), kept for parity with the old
 // nanogui app. NOTE: with MRPT 2.x, `mrpt::imgui::CImGuiSceneView::render()` only renders the
@@ -87,9 +88,9 @@ std::string              arg_georefPolygon;
 /** Extra viz layer loaded from a *.3dscene file, or from --georef-polygon. */
 struct ExtraVizLayer
 {
-    std::string                      fileName;
-    mrpt::opengl::CSetOfObjects::Ptr glObjects;
-    bool                             visible = true;
+    std::string                   fileName;
+    mrpt::viz::CSetOfObjects::Ptr glObjects;
+    bool                          visible = true;
 };
 
 /** Result of loadMapFileWorker(), running on a background thread: a self-contained value (no
@@ -105,6 +106,19 @@ struct MapLoadResult
     std::vector<std::string> knownPointFields;
 };
 
+/** Output of a background visualization build (see rebuild_3d_view()). */
+struct VizBuildResult
+{
+    /// One object per point layer, so layers can be shown/hidden without rebuilding.
+    std::map<std::string, mrpt::viz::CSetOfObjects::Ptr> layers;
+
+    /// Planes and lines. nullptr if not rebuilt by this task.
+    mrpt::viz::CSetOfObjects::Ptr geometry;
+
+    /// If true, `layers` replaces the whole cache; otherwise it is merged into it.
+    bool replacesAll = false;
+};
+
 /** All mutable application state, replacing the individual nanogui widget
  *  pointers of the previous implementation with plain value types (this is
  *  an immediate-mode GUI: widgets read/write these each frame). */
@@ -112,14 +126,20 @@ struct AppState
 {
     mp2p_icp_viz::ImGuiAppShell  shell;
     mrpt::imgui::CImGuiSceneView sceneView;
-    mrpt::opengl::Scene::Ptr     scene = mrpt::opengl::COpenGLScene::Create();
+    mrpt::viz::Scene::Ptr        scene = mrpt::viz::Scene::Create();
 
-    mrpt::opengl::CSetOfObjects::Ptr glVizMap = mrpt::opengl::CSetOfObjects::Create();
-    mrpt::opengl::CGridPlaneXY::Ptr  glGrid   = mrpt::opengl::CGridPlaneXY::Create();
-    mrpt::opengl::CSetOfObjects::Ptr glENUCorner;
-    mrpt::opengl::CSetOfObjects::Ptr glMapCorner;
-    mrpt::opengl::CSetOfObjects::Ptr glTrajectory = mrpt::opengl::CSetOfObjects::Create();
-    mrpt::opengl::CSetOfObjects::Ptr glVizObjects = mrpt::opengl::CSetOfObjects::Create();
+    mrpt::viz::CSetOfObjects::Ptr glVizMap = mrpt::viz::CSetOfObjects::Create();
+    mrpt::viz::CGridPlaneXY::Ptr  glGrid   = mrpt::viz::CGridPlaneXY::Create();
+    mrpt::viz::CSetOfObjects::Ptr glENUCorner;
+    mrpt::viz::CSetOfObjects::Ptr glMapCorner;
+    mrpt::viz::CSetOfObjects::Ptr glTrajectory = mrpt::viz::CSetOfObjects::Create();
+    mrpt::viz::CSetOfObjects::Ptr glVizObjects = mrpt::viz::CSetOfObjects::Create();
+
+    // Cached OpenGL representation of each point layer (built lazily, only when first shown),
+    // so toggling a layer only flips its visibility. Invalidated when the rendering style changes.
+    std::map<std::string, mrpt::viz::CSetOfObjects::Ptr> glLayers;
+    mrpt::viz::CSetOfObjects::Ptr                        glGeometry;  // planes and lines
+    std::optional<mp2p_icp::render_params_point_layer_t> glLayersStyle;
 
     mp2p_icp::metric_map_t theMap;
     std::string            theMapFileName = "unnamed.mm";
@@ -133,13 +153,26 @@ struct AppState
     mrpt::poses::CPose3DInterpolator trajectory;
 
     // Camera travelling:
-    mrpt::poses::CPose3DInterpolator camTravelling;
-    std::optional<double>            camTravellingCurrentTime;
-    std::vector<std::string>         camTravellingLabels;
-    float                            animFPS             = 30.0f;
-    float                            animProgress        = 0.0f;
-    int                              travellingInterpIdx = 0;  // 0=Linear, 1=Spline
-    float                            newKeyframeTime     = 0.0f;
+    mm_viewer::CameraPath camPath;
+    int                   selectedKeyframeIdx = -1;
+    double                newKeyframeTime     = 0.0;
+    int                   travellingInterpIdx = 1;  // TravellingInterpolation: Linear, Spline
+    double                travellingTime      = 0.0;  // playback position [s]
+    bool                  isPlaying           = false;
+    std::string           travellingStatus;
+
+    // Frame-by-frame PNG export of the travelling animation:
+    bool        isRecording    = false;
+    float       videoFPS       = 30.0f;
+    int         videoSize[2]   = {1920, 1080};
+    std::string framesDir      = "mm-viewer-frames";
+    size_t      recordedFrames = 0;
+    // Kept alive between recordings: its compiled scene may share GPU textures with the
+    // on-screen view, so destroying it could release textures still in use there.
+    std::unique_ptr<mrpt::opengl::CFBORender> frameRenderer;
+    std::pair<int, int>                       frameRendererSize = {0, 0};
+    mp2p_icp_viz::SimpleFileDialog            pathSaveDialog;
+    mp2p_icp_viz::SimpleFileDialog            pathLoadDialog;
 
     // View options (mirrors the old nanogui side panel):
     bool  applyGeoRef                = false;
@@ -165,10 +198,9 @@ struct AppState
 
     bool doFitView = false;
 
-    // Forces regeneration of the cached point-cloud OpenGL representation on the next
-    // rebuild_3d_view() call, even if render_params_t happens to compare equal to the last
-    // build (e.g. after loading a different map whose layers coincidentally share names,
-    // visibility, and render options with the previous one).
+    // Forces regeneration of the cached OpenGL representation of all layers on the next
+    // rebuild_3d_view() call, even if the rendering style is unchanged (e.g. after loading a
+    // different map whose layers coincidentally share names with the previous one).
     bool forceRebuildViz = true;
 
     std::string mouseCoordText = "Mouse pointing to: -";
@@ -190,9 +222,9 @@ struct AppState
 
     // Async point-cloud visualization building (see rebuild_3d_view()): same rationale, for
     // theMap.get_visualization(), which can also take a long time on large maps.
-    mp2p_icp_viz::AsyncTask<mrpt::opengl::CSetOfObjects::Ptr> vizBuildTask;
-    bool                                                      isBuildingViz          = false;
-    int                                                       vizBuildTaskGeneration = -1;
+    mp2p_icp_viz::AsyncTask<VizBuildResult> vizBuildTask;
+    bool                                    isBuildingViz          = false;
+    int                                     vizBuildTaskGeneration = -1;
 };
 
 AppState app;
@@ -258,11 +290,11 @@ std::vector<mrpt::math::TPoint2D> readLatLonPolygonFile(const std::string& fileP
  * from a set of WGS84 lat/lon vertices, using the loaded map's
  * georeferencing information.
  */
-mrpt::opengl::CSetOfObjects::Ptr buildGeorefPolygonLayer(
+mrpt::viz::CSetOfObjects::Ptr buildGeorefPolygonLayer(
     const std::vector<mrpt::math::TPoint2D>&      latLonPoints,
     const mp2p_icp::metric_map_t::Georeferencing& georef)
 {
-    auto glLayer = mrpt::opengl::CSetOfObjects::Create();
+    auto glLayer = mrpt::viz::CSetOfObjects::Create();
 
     std::vector<mrpt::math::TPoint3D> mapPoints;
     mapPoints.reserve(latLonPoints.size());
@@ -279,7 +311,7 @@ mrpt::opengl::CSetOfObjects::Ptr buildGeorefPolygonLayer(
 
     if (mapPoints.size() >= 2)
     {
-        auto glLines = mrpt::opengl::CSetOfLines::Create();
+        auto glLines = mrpt::viz::CSetOfLines::Create();
         glLines->setColor_u8(0xff, 0xd0, 0x00, 0xff);
         glLines->setLineWidth(3.0f);
 
@@ -296,20 +328,6 @@ mrpt::opengl::CSetOfObjects::Ptr buildGeorefPolygonLayer(
 }
 
 void updateGuiAfterLoadingNewMap();
-
-void rebuildCamTravellingLabels()
-{
-    app.camTravellingLabels.clear();
-    for (size_t i = 0; i < app.camTravelling.size(); i++)
-    {
-        auto it = app.camTravelling.begin();
-        std::advance(it, static_cast<std::ptrdiff_t>(i));
-
-        app.camTravellingLabels.push_back(mrpt::format(
-            "[%02u] t=%.02fs pose=%s", static_cast<unsigned int>(i),
-            mrpt::Clock::toDouble(it->first), it->second.asString().c_str()));
-    }
-}
 
 /** Does the actual (potentially slow: disk I/O, decompression, sanity checks) map loading work.
  *  Deliberately self-contained -- reads/writes only its local `res`, never `app.*` -- so it is
@@ -578,8 +596,9 @@ std::string transformAndFormatSelectedPoint(const mrpt::math::TPoint3D& pt)
 
 void updateCameraLookCoordinates()
 {
-    const auto&                cam = app.sceneView.camera();
-    const mrpt::math::TPoint3D pt(cam.getPointingAtX(), cam.getPointingAtY(), cam.getPointingAtZ());
+    const auto&                cam = app.sceneView.cameraController;
+    const mrpt::math::TPoint3D pt(
+        cam.getCameraPointingX(), cam.getCameraPointingY(), cam.getCameraPointingZ());
     app.cameraLookText = "Camera looking at: " + transformAndFormatSelectedPoint(pt);
 }
 
@@ -608,8 +627,10 @@ void renderSceneOverlay()
         return;
     }
 
-    mrpt::math::TLine3D mouseRay;
-    app.scene->getViewport("main")->get3DRayForPixelCoord(localX, localY, mouseRay);
+    const auto mouseRayOpt = app.scene->getViewport("main")->get3DRayForPixelCoord(
+        mrpt::img::TPixelCoord(localX, localY));
+    if (!mouseRayOpt) return;  // viewport not rendered yet
+    const mrpt::math::TLine3D mouseRay = *mouseRayOpt;
 
     using mrpt::math::TPoint3D;
     const mrpt::math::TPlane groundPlane(TPoint3D(0, 0, 0), TPoint3D(1, 0, 0), TPoint3D(0, 1, 0));
@@ -633,21 +654,21 @@ void ensureMiniCornerViewports()
         gl_view->setViewportPosition(0, 0, 0.1, 0.1 * 16.0 / 9.0);
         gl_view->setTransparent(true);
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("X");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("X");
             obj->setLocation(1.1, 0, 0);
             gl_view->insert(obj);
         }
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Y");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Y");
             obj->setLocation(0, 1.1, 0);
             gl_view->insert(obj);
         }
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Z");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Z");
             obj->setLocation(0, 0, 1.1);
             gl_view->insert(obj);
         }
-        gl_view->insert(mrpt::opengl::stock_objects::CornerXYZ());
+        gl_view->insert(mrpt::viz::stock_objects::CornerXYZ());
     }
 
     if (!app.scene->getViewport(SECOND_MINI_VIEW_NAME))
@@ -657,25 +678,25 @@ void ensureMiniCornerViewports()
         gl_view->setViewportPosition(0.1, 0, 0.1, 0.1 * 16.0 / 9.0);
         gl_view->setTransparent(true);
 
-        auto glRoot = mrpt::opengl::CSetOfObjects::Create();
+        auto glRoot = mrpt::viz::CSetOfObjects::Create();
         gl_view->insert(glRoot);
 
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("X");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("X");
             obj->setLocation(1.1, 0, 0);
             glRoot->insert(obj);
         }
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Y");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Y");
             obj->setLocation(0, 1.1, 0);
             glRoot->insert(obj);
         }
         {
-            mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Z");
+            mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Z");
             obj->setLocation(0, 0, 1.1);
             glRoot->insert(obj);
         }
-        glRoot->insert(mrpt::opengl::stock_objects::CornerXYZ());
+        glRoot->insert(mrpt::viz::stock_objects::CornerXYZ());
     }
 }
 
@@ -690,14 +711,14 @@ void updateMiniCornerView()
         return;
     }
 
-    mrpt::opengl::TFontParams fp;
+    mrpt::viz::TFontParams fp;
     fp.draw_shadow = true;
     fp.vfont_scale = 9.0f;
 
     {
-        mrpt::opengl::CCamera& view_cam = gl_view1->getCamera();
-        view_cam.setAzimuthDegrees(app.sceneView.camera().getAzimuthDegrees());
-        view_cam.setElevationDegrees(app.sceneView.camera().getElevationDegrees());
+        mrpt::viz::CCamera& view_cam = gl_view1->getCamera();
+        view_cam.setAzimuthDegrees(app.sceneView.cameraController.getAzimuthDegrees());
+        view_cam.setElevationDegrees(app.sceneView.cameraController.getElevationDegrees());
         view_cam.setZoomDistance(5);
     }
 
@@ -730,9 +751,9 @@ void updateMiniCornerView()
         mrpt::math::TVector3D(0, 0, 0)));
 
     {
-        mrpt::opengl::CCamera& view_cam = gl_view2->getCamera();
-        view_cam.setAzimuthDegrees(app.sceneView.camera().getAzimuthDegrees());
-        view_cam.setElevationDegrees(app.sceneView.camera().getElevationDegrees());
+        mrpt::viz::CCamera& view_cam = gl_view2->getCamera();
+        view_cam.setAzimuthDegrees(app.sceneView.cameraController.getAzimuthDegrees());
+        view_cam.setElevationDegrees(app.sceneView.cameraController.getElevationDegrees());
         view_cam.setZoomDistance(5);
     }
 
@@ -781,13 +802,102 @@ void updateGuiAfterLoadingNewMap()
     }
 }
 
-void camTravellingStop() { app.camTravellingCurrentTime.reset(); }
+mm_viewer::CameraKeyframe currentCameraKeyframe()
+{
+    const auto&               cam = app.sceneView.cameraController;
+    mm_viewer::CameraKeyframe k;
+    k.x            = cam.getCameraPointingX();
+    k.y            = cam.getCameraPointingY();
+    k.z            = cam.getCameraPointingZ();
+    k.azimuthDeg   = cam.getAzimuthDegrees();
+    k.elevationDeg = cam.getElevationDegrees();
+    k.zoom         = cam.getZoomDistance();
+    return k;
+}
+
+void applyCameraKeyframe(const mm_viewer::CameraKeyframe& k)
+{
+    auto& cam = app.sceneView.cameraController;
+    cam.setCameraPointing(
+        static_cast<float>(k.x), static_cast<float>(k.y), static_cast<float>(k.z));
+    cam.setAzimuthDegrees(static_cast<float>(k.azimuthDeg));
+    cam.setElevationDegrees(static_cast<float>(k.elevationDeg));
+    cam.setZoomDistance(static_cast<float>(k.zoom));
+}
+
+void applyCameraPathAt(double t)
+{
+    if (app.camPath.empty())
+    {
+        return;
+    }
+    applyCameraKeyframe(mm_viewer::interpolateCameraPath(
+        app.camPath, t, static_cast<mm_viewer::TravellingInterpolation>(app.travellingInterpIdx)));
+}
+
+void camTravellingStop()
+{
+    app.isPlaying = false;
+
+    if (app.isRecording)
+    {
+        app.isRecording      = false;
+        app.travellingStatus = mrpt::format(
+            "Wrote %zu frames to '%s'. To make a video:\n"
+            "ffmpeg -framerate %g -i %s/frame_%%06d.png -c:v libx264 -pix_fmt yuv420p video.mp4",
+            app.recordedFrames, app.framesDir.c_str(), static_cast<double>(app.videoFPS),
+            app.framesDir.c_str());
+        std::cout << app.travellingStatus << std::endl;
+    }
+}
+
+/** Starts playing the camera path from its first keyframe. If `record`, playback advances
+ * exactly 1/FPS per frame and each frame is saved as a PNG file; otherwise, it follows the
+ * wall clock. */
+void camTravellingStart(bool record)
+{
+    if (app.camPath.empty())
+    {
+        return;
+    }
+    app.travellingStatus.clear();
+
+    if (record)
+    {
+        try
+        {
+            std::filesystem::create_directories(app.framesDir);
+
+            const std::pair<int, int> size = {app.videoSize[0], app.videoSize[1]};
+            if (!app.frameRenderer || app.frameRendererSize != size)
+            {
+                mrpt::opengl::CFBORender::Parameters params(
+                    static_cast<unsigned int>(size.first), static_cast<unsigned int>(size.second));
+                // Rendering happens on the GUI thread, so reuse its OpenGL context:
+                params.create_EGL_context = false;
+                app.frameRenderer         = std::make_unique<mrpt::opengl::CFBORender>(params);
+                app.frameRendererSize     = size;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            app.travellingStatus = std::string("Cannot start recording: ") + e.what();
+            std::cerr << app.travellingStatus << std::endl;
+            return;
+        }
+        app.isRecording    = true;
+        app.recordedFrames = 0;
+    }
+
+    app.isPlaying      = true;
+    app.travellingTime = app.camPath.begin()->first;
+}
 
 /** Recomputed every frame so it stays in sync as the user zooms/pans (the "linear" mode needs
  * the current camera pose). */
 void updateCameraClipDistances()
 {
-    auto& cam = app.sceneView.camera();
+    auto& cam = app.sceneView.cameraController;
 
     float clipNear = 0;
     float clipFar  = 0;
@@ -804,9 +914,9 @@ void updateCameraClipDistances()
         // Convert to frustum distances using the camera elevation and zoom.
         const float elDeg   = cam.getElevationDegrees();
         const float sinEl   = std::sin(mrpt::DEG2RAD(elDeg));
-        const float cameraZ = cam.getPointingAtZ() + cam.getZoomDistance() * sinEl;
+        const float cameraZ = cam.getCameraPointingZ() + cam.getZoomDistance() * sinEl;
 
-        const float orthoFactor = cam.isProjective() ? 1.0f : 2.0f;
+        const float orthoFactor = cam.isProjectiveModel() ? 1.0f : 2.0f;
         const float zFloor      = orthoFactor * app.clipNear;
         const float zCeiling    = orthoFactor * app.clipFar;
 
@@ -822,62 +932,126 @@ void updateCameraClipDistances()
         }
     }
 
-    cam.setProjectiveFOVdeg(app.cameraFOV);
+    cam.setFOVdeg(app.cameraFOV);
 
     app.scene->getViewport("main")->setViewportClipDistances(clipNear, clipFar);
 }
 
+/** Sets the camera for the current playback time. Runs before the scene is rendered. */
 void processCameraTravelling()
 {
-    if (!app.camTravellingCurrentTime.has_value())
+    if (!app.isPlaying)
     {
         return;
     }
-    double& t = app.camTravellingCurrentTime.value();
-
-    const double t0  = mrpt::Clock::toDouble(app.camTravelling.begin()->first);
-    const double t1  = mrpt::Clock::toDouble(app.camTravelling.rbegin()->first);
-    app.animProgress = (t1 > t0) ? static_cast<float>((t - t0) / (t1 - t0)) : 0.0f;
-
-    if (t >= t1)
+    if (app.camPath.empty())
     {
         camTravellingStop();
         return;
     }
+    app.travellingTime = std::min(app.travellingTime, app.camPath.rbegin()->first);
+    applyCameraPathAt(app.travellingTime);
+}
 
-    const auto interpMethod = app.travellingInterpIdx == 0
-                                  ? mrpt::poses::TInterpolatorMethod::imLinear2Neig
-                                  : mrpt::poses::TInterpolatorMethod::imSSLSLL;
-    app.camTravelling.setInterpolationMethod(interpMethod);
-
-    mrpt::math::TPose3D p;
-    bool                valid = false;
-    app.camTravelling.interpolate(mrpt::Clock::fromDouble(t), p, valid);
-    if (valid)
+/** Saves the current frame if recording, then moves the playback time forward. Runs once the
+ * camera and clip distances for this frame are set. */
+void advanceCameraTravelling()
+{
+    if (!app.isPlaying || app.camPath.empty())
     {
-        auto& cam = app.sceneView.camera();
-        cam.setPointingAt(
-            static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z));
-        cam.setAzimuthDegrees(static_cast<float>(mrpt::RAD2DEG(p.yaw)));
-        cam.setElevationDegrees(static_cast<float>(mrpt::RAD2DEG(p.pitch)));
-        cam.setZoomDistance(static_cast<float>(p.roll / TRAVELING_ZOOM2ROLL));
+        return;
+    }
+    const double t0 = app.camPath.begin()->first;
+    const double t1 = app.camPath.rbegin()->first;
+
+    if (!app.isRecording)
+    {
+        if (app.travellingTime >= t1)
+        {
+            camTravellingStop();
+            return;
+        }
+        app.travellingTime += static_cast<double>(ImGui::GetIO().DeltaTime);
+        return;
     }
 
-    const double dt = app.animFPS > 0 ? 1.0 / app.animFPS : 1.0 / 30.0;
-    t += dt;
+    // Wait for the map visualization, so no frame misses it:
+    if (app.isBuildingViz)
+    {
+        return;
+    }
+
+    // Only the main view goes into the frames, not the axis-corner gizmo views:
+    std::vector<std::string> hiddenViews;
+    for (const auto& vp : app.scene->viewports())
+    {
+        if (vp->getName() != "main" && vp->getViewportVisibility())
+        {
+            vp->setViewportVisibility(false);
+            hiddenViews.push_back(vp->getName());
+        }
+    }
+
+    mrpt::img::CImage img;
+    std::string       renderError;
+    try
+    {
+        mrpt::viz::CCamera cam;
+        app.sceneView.cameraController.applyTo(cam);
+        app.frameRenderer->setCamera(cam);
+        app.frameRenderer->render_RGB(*app.scene, img);
+    }
+    catch (const std::exception& e)
+    {
+        renderError = e.what();
+    }
+
+    for (const auto& name : hiddenViews)
+    {
+        app.scene->getViewport(name)->setViewportVisibility(true);
+    }
+
+    if (!renderError.empty())
+    {
+        camTravellingStop();
+        app.travellingStatus = "Error rendering frame: " + renderError;
+        std::cerr << app.travellingStatus << std::endl;
+        return;
+    }
+
+    const auto file =
+        (std::filesystem::path(app.framesDir) / mrpt::format("frame_%06zu.png", app.recordedFrames))
+            .string();
+    if (!img.saveToFile(file))
+    {
+        camTravellingStop();
+        app.travellingStatus = "Error saving frame: " + file;
+        std::cerr << app.travellingStatus << std::endl;
+        return;
+    }
+    app.recordedFrames++;
+
+    if (app.travellingTime >= t1)
+    {
+        camTravellingStop();
+        return;
+    }
+    // From the frame count, so the time step does not accumulate rounding errors:
+    app.travellingTime =
+        t0 + static_cast<double>(app.recordedFrames) / static_cast<double>(app.videoFPS);
 }
 
 void handleKeyboard()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (io.WantTextInput)
+    if (io.WantTextInput || app.isPlaying)
     {
-        return;
+        return;  // (the camera path drives the camera while playing)
     }
 
     constexpr float SLIDE_VELOCITY     = 0.01f;
     constexpr float SENSIBILITY_ROTATE = 1.0f;
-    auto&           cam                = app.sceneView.camera();
+    auto&           cam                = app.sceneView.cameraController;
 
     auto doStrideSides = [&](bool toTheRight)
     {
@@ -886,9 +1060,9 @@ void handleKeyboard()
         const float dy   = std::sin(mrpt::DEG2RAD(az + 90.f));
         const float d    = toTheRight ? 1.0f : -1.0f;
         const float dist = cam.getZoomDistance();
-        cam.setPointingAt(
-            cam.getPointingAtX() + d * dx * dist * SLIDE_VELOCITY,
-            cam.getPointingAtY() + d * dy * dist * SLIDE_VELOCITY, cam.getPointingAtZ());
+        cam.setCameraPointing(
+            cam.getCameraPointingX() + d * dx * dist * SLIDE_VELOCITY,
+            cam.getCameraPointingY() + d * dy * dist * SLIDE_VELOCITY, cam.getCameraPointingZ());
     };
 
     auto doRotateEyeYaw = [&](bool toTheRight)
@@ -897,16 +1071,16 @@ void handleKeyboard()
         const float az0 = cam.getAzimuthDegrees();
         const float el0 = cam.getElevationDegrees();
 
-        const float eyeX = cam.getPointingAtX() +
+        const float eyeX = cam.getCameraPointingX() +
                            dis * std::cos(mrpt::DEG2RAD(az0)) * std::cos(mrpt::DEG2RAD(el0));
-        const float eyeY = cam.getPointingAtY() +
+        const float eyeY = cam.getCameraPointingY() +
                            dis * std::sin(mrpt::DEG2RAD(az0)) * std::cos(mrpt::DEG2RAD(el0));
-        const float eyeZ = cam.getPointingAtZ() + dis * std::sin(mrpt::DEG2RAD(el0));
+        const float eyeZ = cam.getCameraPointingZ() + dis * std::sin(mrpt::DEG2RAD(el0));
 
         const float newAz = az0 + (toTheRight ? -SENSIBILITY_ROTATE : SENSIBILITY_ROTATE);
         cam.setAzimuthDegrees(newAz);
 
-        cam.setPointingAt(
+        cam.setCameraPointing(
             eyeX - dis * std::cos(mrpt::DEG2RAD(newAz)) * std::cos(mrpt::DEG2RAD(el0)),
             eyeY - dis * std::sin(mrpt::DEG2RAD(newAz)) * std::cos(mrpt::DEG2RAD(el0)),
             eyeZ - dis * std::sin(mrpt::DEG2RAD(el0)));
@@ -919,18 +1093,18 @@ void handleKeyboard()
         const float dy   = std::sin(mrpt::DEG2RAD(az));
         const float d    = toUp ? -1.0f : 1.0f;
         const float dist = cam.getZoomDistance();
-        cam.setPointingAt(
-            cam.getPointingAtX() + d * dx * dist * SLIDE_VELOCITY,
-            cam.getPointingAtY() + d * dy * dist * SLIDE_VELOCITY, cam.getPointingAtZ());
+        cam.setCameraPointing(
+            cam.getCameraPointingX() + d * dx * dist * SLIDE_VELOCITY,
+            cam.getCameraPointingY() + d * dy * dist * SLIDE_VELOCITY, cam.getCameraPointingZ());
     };
 
     auto doMoveVertically = [&](bool toUp)
     {
         const float d    = toUp ? 1.0f : -1.0f;
         const float dist = cam.getZoomDistance();
-        cam.setPointingAt(
-            cam.getPointingAtX(), cam.getPointingAtY(),
-            cam.getPointingAtZ() + d * dist * SLIDE_VELOCITY);
+        cam.setCameraPointing(
+            cam.getCameraPointingX(), cam.getCameraPointingY(),
+            cam.getCameraPointingZ() + d * dist * SLIDE_VELOCITY);
     };
 
     const bool up =
@@ -1005,8 +1179,11 @@ void rebuild_3d_view()
 {
     std::optional<mrpt::math::TBoundingBoxf> mapBbox;
 
-    mp2p_icp::render_params_t rpMap;
-    rpMap.points.visible = false;
+    const auto isLayerVisible = [](const std::string& lyName)
+    {
+        const auto itV = app.layerVisible.find(lyName);
+        return (itV == app.layerVisible.end()) ? true : itV->second;
+    };
 
     for (const auto& lyName : app.layerNames)
     {
@@ -1018,82 +1195,124 @@ void rebuild_3d_view()
                 mapBbox       = mapBbox.has_value() ? mapBbox->unionWith(bb) : bb;
             }
         }
-
-        const auto itV       = app.layerVisible.find(lyName);
-        const bool isVisible = (itV == app.layerVisible.end()) ? true : itV->second;
-        if (!isVisible)
-        {
-            continue;  // hidden
-        }
-        rpMap.points.visible = true;
-
-        auto& rpL                       = rpMap.points.perLayer[lyName];
-        rpL.pointSize                   = app.pointSize;
-        rpL.render_voxelmaps_as_points  = app.viewVoxelsAsPoints;
-        rpL.render_voxelmaps_free_space = app.viewVoxelsFreeSpace;
-
-        if (app.colorizeMap)
-        {
-            auto& cm    = rpL.colorMode.emplace();
-            cm.colorMap = mrpt::typemeta::str2enum<mrpt::img::TColormap>(
-                kColorIntensityNames[app.colorIntensityIdx]);
-
-            if (!app.knownPointFields.empty())
-            {
-                cm.recolorizeByField =
-                    app.knownPointFields.at(static_cast<size_t>(app.recolorizeByFieldIdx));
-            }
-
-            if (app.autoBBoxOutliers)
-            {
-                cm.autoBoundingBoxOutliersPercentile = app.autoBBoxOutliersPercentile;
-            }
-        }
-        if (app.keepNativeCloudColors)
-        {
-            auto& cm                     = rpL.colorMode.emplace();
-            cm.keep_original_cloud_color = true;
-            rpL.force_alpha_channel      = true;
-        }
     }
 
-    for (auto& [layer, rp] : rpMap.points.perLayer)
+    // Rendering style, common to all point layers:
+    mp2p_icp::render_params_point_layer_t rpL;
+    rpL.pointSize                   = app.pointSize;
+    rpL.color                       = mrpt::img::TColor(0xff, 0x00, 0x00, 0x80);
+    rpL.render_voxelmaps_as_points  = app.viewVoxelsAsPoints;
+    rpL.render_voxelmaps_free_space = app.viewVoxelsFreeSpace;
+
+    if (app.colorizeMap)
     {
-        rp.color = mrpt::img::TColor(0xff, 0x00, 0x00, 0x80);
+        auto& cm    = rpL.colorMode.emplace();
+        cm.colorMap = mrpt::typemeta::str2enum<mrpt::img::TColormap>(
+            kColorIntensityNames[app.colorIntensityIdx]);
+
+        if (!app.knownPointFields.empty())
+        {
+            cm.recolorizeByField =
+                app.knownPointFields.at(static_cast<size_t>(app.recolorizeByFieldIdx));
+        }
+
+        if (app.autoBBoxOutliers)
+        {
+            cm.autoBoundingBoxOutliersPercentile = app.autoBBoxOutliersPercentile;
+        }
     }
-
-    // Regenerate points opengl representation only if some parameter changed (or a new map
-    // was just loaded, regardless of whether rpMap happens to compare equal to the last one).
-    // Built on a background thread (theMap.get_visualization() can take a long time on large
-    // maps) so the main/GL thread keeps pumping events instead of appearing "not responding".
-    static std::optional<mp2p_icp::render_params_t> prevRenderParams;
-
-    const bool needsRebuild =
-        !prevRenderParams.has_value() || prevRenderParams.value() != rpMap || app.forceRebuildViz;
-
-    if (needsRebuild && !app.isBuildingViz)
+    if (app.keepNativeCloudColors)
     {
-        app.forceRebuildViz = false;
-        prevRenderParams    = rpMap;
-
-        app.isBuildingViz          = true;
-        app.vizBuildTaskGeneration = app.mapGeneration;
-
-        // Shallow copy: shares the underlying (immutable, once loaded) layer CMetricMap::Ptr
-        // objects, so this is cheap regardless of map size, and safe to read from the
-        // background thread even if the main thread replaces app.theMap in the meantime.
-        const mp2p_icp::metric_map_t mapCopy = app.theMap;
-        app.vizBuildTask.start([mapCopy, rpMap]() { return mapCopy.get_visualization(rpMap); });
+        auto& cm                     = rpL.colorMode.emplace();
+        cm.keep_original_cloud_color = true;
+        rpL.force_alpha_channel      = true;
     }
 
-    if (auto glPts = app.vizBuildTask.poll())
+    // Layer OpenGL objects are cached: showing/hiding a layer only changes its visibility.
+    // A layer is built the first time it is shown, and all of them are discarded when the
+    // rendering style changes (or a new map is loaded). Built on a background thread (it can
+    // take a long time on large maps) so the main/GL thread keeps pumping events instead of
+    // appearing "not responding".
+    if (!app.isBuildingViz)
+    {
+        const bool rebuildAll =
+            app.forceRebuildViz || !app.glLayersStyle.has_value() || *app.glLayersStyle != rpL;
+
+        std::vector<std::string> layersToBuild;
+        for (const auto& lyName : app.layerNames)
+        {
+            if (isLayerVisible(lyName) && app.theMap.layers.count(lyName) != 0 &&
+                (rebuildAll || app.glLayers.count(lyName) == 0))
+            {
+                layersToBuild.push_back(lyName);
+            }
+        }
+
+        if (rebuildAll || !layersToBuild.empty())
+        {
+            app.forceRebuildViz = false;
+            app.glLayersStyle   = rpL;
+
+            app.isBuildingViz          = true;
+            app.vizBuildTaskGeneration = app.mapGeneration;
+
+            // Shallow copy: shares the underlying (immutable, once loaded) layer CMetricMap::Ptr
+            // objects, so this is cheap regardless of map size, and safe to read from the
+            // background thread even if the main thread replaces app.theMap in the meantime.
+            const mp2p_icp::metric_map_t mapCopy = app.theMap;
+            app.vizBuildTask.start(
+                [mapCopy, rpL, layersToBuild, rebuildAll]()
+                {
+                    VizBuildResult r;
+                    r.replacesAll = rebuildAll;
+                    if (rebuildAll)
+                    {
+                        r.geometry = mrpt::viz::CSetOfObjects::Create();
+                        mapCopy.get_visualization_planes(
+                            *r.geometry, mp2p_icp::render_params_planes_t());
+                        mapCopy.get_visualization_lines(
+                            *r.geometry, mp2p_icp::render_params_lines_t());
+                    }
+                    for (const auto& lyName : layersToBuild)
+                    {
+                        auto glLayer = mrpt::viz::CSetOfObjects::Create();
+                        mp2p_icp::metric_map_t::get_visualization_map_layer(
+                            *glLayer, rpL, mapCopy.layers.at(lyName));
+                        r.layers[lyName] = glLayer;
+                    }
+                    return r;
+                });
+        }
+    }
+
+    if (auto res = app.vizBuildTask.poll())
     {
         app.isBuildingViz = false;
 
         if (app.vizBuildTaskGeneration == app.mapGeneration)
         {
+            if (res->replacesAll)
+            {
+                app.glLayers = std::move(res->layers);
+            }
+            else
+            {
+                app.glLayers.merge(res->layers);
+            }
+            if (res->geometry)
+            {
+                app.glGeometry = res->geometry;
+            }
+
             app.glVizMap->clear();
-            app.glVizMap->insert(*glPts);
+            if (app.glGeometry)
+            {
+                app.glVizMap->insert(app.glGeometry);
+            }
+            for (const auto& [lyName, glLayer] : app.glLayers)
+            {
+                app.glVizMap->insert(glLayer);
+            }
             app.glVizMap->insert(app.glMapCorner);
             app.glVizMap->insert(app.glTrajectory);
             app.glVizMap->insert(app.glVizObjects);
@@ -1104,6 +1323,11 @@ void rebuild_3d_view()
             // rebuild for the current map on the next frame.
             app.forceRebuildViz = true;
         }
+    }
+
+    for (const auto& [lyName, glLayer] : app.glLayers)
+    {
+        glLayer->setVisibility(isLayerVisible(lyName));
     }
 
     if (app.applyGeoRef && app.theMap.georeferencing.has_value())
@@ -1133,8 +1357,8 @@ void rebuild_3d_view()
         const auto midPt  = (mapBbox->min + mapBbox->max) * 0.5;
         const auto mapLen = (mapBbox->max - mapBbox->min).norm();
 
-        app.sceneView.camera().setPointingAt(midPt.x, midPt.y, midPt.z);
-        app.sceneView.camera().setZoomDistance(mapLen);
+        app.sceneView.cameraController.setCameraPointing(midPt.x, midPt.y, midPt.z);
+        app.sceneView.cameraController.setZoomDistance(mapLen);
     }
     app.doFitView = false;
 
@@ -1149,7 +1373,7 @@ void rebuild_3d_view()
             {
                 const auto& p0 = prevPose.value();
 
-                auto glSegment = mrpt::opengl::CArrow::Create();
+                auto glSegment = mrpt::viz::CArrow::Create();
                 glSegment->setArrowEnds(p0.translation(), p.translation());
                 glSegment->setHeadRatio(.0);
                 glSegment->setLargeRadius(trajectoryCylRadius);
@@ -1169,12 +1393,12 @@ void rebuild_3d_view()
         app.glVizObjects->insert(evl.glObjects);
     }
 
-    app.sceneView.camera().setProjectiveModel(!app.viewOrtho && !app.view2D);
+    app.sceneView.cameraController.setProjectiveModel(!app.viewOrtho && !app.view2D);
 
-    if (app.view2D)
+    if (app.view2D && !app.isPlaying)
     {
-        app.sceneView.camera().setAzimuthDegrees(-90.0f);
-        app.sceneView.camera().setElevationDegrees(90.0f);
+        app.sceneView.cameraController.setAzimuthDegrees(-90.0f);
+        app.sceneView.cameraController.setElevationDegrees(90.0f);
     }
 
     ensureMiniCornerViewports();
@@ -1215,7 +1439,10 @@ void renderMapViewerPanel()
     }
     else if (app.isBuildingViz)
     {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Building 3D visualization...");
+        // Blink (smooth alpha pulse) to draw attention while the background build runs:
+        const float alpha =
+            0.25f + 0.75f * 0.5f * (1.0f + std::sin(static_cast<float>(ImGui::GetTime()) * 6.0f));
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, alpha), "Building 3D visualization...");
     }
 
     ImGui::Separator();
@@ -1307,8 +1534,8 @@ void renderViewPanel()
         if (ImGui::Button(caption))
         {
             app.view2D = false;
-            app.sceneView.camera().setAzimuthDegrees(az);
-            app.sceneView.camera().setElevationDegrees(el);
+            app.sceneView.cameraController.setAzimuthDegrees(az);
+            app.sceneView.cameraController.setElevationDegrees(el);
         }
         ImGui::SameLine();
     };
@@ -1427,67 +1654,239 @@ void renderMapsPanel()
     ImGui::End();
 }
 
-/** "Travelling" window: camera keyframe animation controls. */
+double nextKeyframeTime() { return app.camPath.empty() ? 0.0 : app.camPath.rbegin()->first + 1.0; }
+
+/** "Travelling" window: camera keyframes for fly-by animations, and their playback/recording. */
 void renderTravellingPanel()
 {
     ImGui::Begin("Travelling");
 
-    ImGui::TextUnformatted("Define camera travelling paths");
+    ImGui::TextWrapped(
+        "Camera fly-by: add keyframes from the current view, then play them back or record them "
+        "as PNG frames.");
 
-    // Plain read-only list (not a combo): keyframes cannot currently be selected, jumped to,
-    // or deleted individually, so an interactive-looking widget would be misleading.
-    ImGui::TextUnformatted("Keyframes:");
-    if (ImGui::BeginChild("##travellingKeys", ImVec2(0, 100), true))
+    // --- Keyframe list ---
+    ImGui::Text("Keyframes: %zu", app.camPath.size());
+    if (app.selectedKeyframeIdx >= static_cast<int>(app.camPath.size()))
     {
-        for (const auto& label : app.camTravellingLabels)
+        app.selectedKeyframeIdx = -1;
+    }
+    const auto selectedIt = []()
+    {
+        auto it = app.camPath.begin();
+        std::advance(it, app.selectedKeyframeIdx);
+        return it;
+    };
+
+    bool goToSelected = false;
+    if (ImGui::BeginChild("##travellingKeys", ImVec2(0, 120), true))
+    {
+        int idx = 0;
+        for (const auto& [t, k] : app.camPath)
         {
-            ImGui::TextUnformatted(label.c_str());
+            const std::string label = mrpt::format(
+                "[%02d] t=%.2fs  az=%.0f el=%.0f d=%.1f##kf%d", idx, t, k.azimuthDeg,
+                k.elevationDeg, k.zoom, idx);
+            if (ImGui::Selectable(
+                    label.c_str(), idx == app.selectedKeyframeIdx,
+                    ImGuiSelectableFlags_AllowDoubleClick))
+            {
+                app.selectedKeyframeIdx = idx;
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                {
+                    goToSelected = true;
+                }
+            }
+            ImGui::SetItemTooltip(
+                "t=%.3f s\nLooking at: (%.3f, %.3f, %.3f)\nAzimuth: %.2f deg\nElevation: %.2f "
+                "deg\nDistance: %.3f m\nDouble-click to move the camera here",
+                t, k.x, k.y, k.z, k.azimuthDeg, k.elevationDeg, k.zoom);
+            idx++;
         }
     }
     ImGui::EndChild();
 
-    ImGui::InputFloat("New keyframe time [s]", &app.newKeyframeTime);
-    ImGui::SameLine();
-    if (ImGui::Button("Add"))
-    {
-        auto&      cam = app.sceneView.camera();
-        const auto p   = mrpt::math::TPose3D(
-              cam.getPointingAtX(), cam.getPointingAtY(), cam.getPointingAtZ(),
-              mrpt::DEG2RAD(cam.getAzimuthDegrees()), mrpt::DEG2RAD(cam.getElevationDegrees()),
-              cam.getZoomDistance() * TRAVELING_ZOOM2ROLL);
-        app.camTravelling.insert(
-            mrpt::Clock::fromDouble(static_cast<double>(app.newKeyframeTime)), p);
-        rebuildCamTravellingLabels();
-        app.newKeyframeTime += 1.0f;
-    }
+    ImGui::BeginDisabled(app.isPlaying);
 
-    const bool isPlaying = app.camTravellingCurrentTime.has_value();
-    ImGui::BeginDisabled(isPlaying || app.camTravelling.empty());
-    if (ImGui::Button("Play"))
+    const bool hasSelection = app.selectedKeyframeIdx >= 0;
+    ImGui::BeginDisabled(!hasSelection);
+    if (ImGui::Button("Go to"))
     {
-        app.camTravellingCurrentTime.emplace(
-            mrpt::Clock::toDouble(app.camTravelling.begin()->first));
+        goToSelected = true;
+    }
+    ImGui::SetItemTooltip("Move the camera to the selected keyframe (or double-click it)");
+    ImGui::SameLine();
+    if (ImGui::Button("Update"))
+    {
+        selectedIt()->second = currentCameraKeyframe();
+    }
+    ImGui::SetItemTooltip("Replace the selected keyframe with the current view");
+    ImGui::SameLine();
+    if (ImGui::Button("Delete"))
+    {
+        app.camPath.erase(selectedIt());
+        app.selectedKeyframeIdx =
+            std::min(app.selectedKeyframeIdx, static_cast<int>(app.camPath.size()) - 1);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::BeginDisabled(!isPlaying);
+    ImGui::BeginDisabled(app.camPath.empty());
+    if (ImGui::Button("Clear all"))
+    {
+        app.camPath.clear();
+        app.selectedKeyframeIdx = -1;
+        app.newKeyframeTime     = 0.0;
+    }
+    ImGui::EndDisabled();
+
+    if (goToSelected && hasSelection)
+    {
+        const auto it      = selectedIt();
+        app.travellingTime = it->first;
+        applyCameraKeyframe(it->second);
+    }
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Time [s]");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70);
+    ImGui::InputDouble("##newKeyframeTime", &app.newKeyframeTime, 0.0, 0.0, "%.2f");
+    ImGui::SameLine();
+    // The input box accepts "nan" or "inf", which must never become a keyframe time:
+    const bool validTime        = std::isfinite(app.newKeyframeTime);
+    const bool replacesKeyframe = validTime && app.camPath.count(app.newKeyframeTime) != 0;
+    ImGui::BeginDisabled(!validTime);
+    if (ImGui::Button(replacesKeyframe ? "Replace with current view" : "Add current view"))
+    {
+        const double t = app.newKeyframeTime;
+        app.camPath[t] = currentCameraKeyframe();
+        app.selectedKeyframeIdx =
+            static_cast<int>(std::distance(app.camPath.begin(), app.camPath.find(t)));
+        app.newKeyframeTime = nextKeyframeTime();
+    }
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Store the current camera view as a keyframe at the given time");
+
+    if (ImGui::Button("Load path..."))
+    {
+        app.pathLoadDialog.open(
+            mp2p_icp_viz::SimpleFileDialog::Mode::Open, {{"txt", "Camera paths (*.txt)"}},
+            "Load camera path");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(app.camPath.empty());
+    if (ImGui::Button("Save path..."))
+    {
+        app.pathSaveDialog.open(
+            mp2p_icp_viz::SimpleFileDialog::Mode::Save, {{"txt", "Camera paths (*.txt)"}},
+            "Save camera path");
+    }
+    ImGui::EndDisabled();
+
+    ImGui::EndDisabled();  // isPlaying
+
+    // --- Playback ---
+    ImGui::SeparatorText("Playback");
+
+    ImGui::BeginDisabled(app.isPlaying || app.camPath.size() < 2);
+    if (ImGui::Button("Play"))
+    {
+        camTravellingStart(false);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!app.isPlaying);
     if (ImGui::Button("Stop"))
     {
         camTravellingStop();
     }
     ImGui::EndDisabled();
-
-    if (ImGui::InputFloat("Animation FPS", &app.animFPS))
-    {
-        app.animFPS = std::clamp(app.animFPS, 1.0f, 240.0f);
-    }
-
+    ImGui::SameLine();
     const char* interpItems[] = {"Linear", "Spline"};
+    ImGui::SetNextItemWidth(90);
     ImGui::Combo("Interpolation", &app.travellingInterpIdx, interpItems, 2);
 
-    ImGui::BeginDisabled(true);
-    ImGui::SliderFloat("Progress", &app.animProgress, 0.0f, 1.0f);
+    if (app.camPath.size() >= 2)
+    {
+        const double t0 = app.camPath.begin()->first;
+        const double t1 = app.camPath.rbegin()->first;
+
+        // Doubles as a progress bar while playing, and as a scrubber to preview the path:
+        auto tSlider = static_cast<float>(std::clamp(app.travellingTime, t0, t1));
+        ImGui::BeginDisabled(app.isPlaying);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::SliderFloat(
+                "##travellingTime", &tSlider, static_cast<float>(t0), static_cast<float>(t1),
+                "t = %.2f s"))
+        {
+            app.travellingTime = tSlider;
+            applyCameraPathAt(app.travellingTime);
+        }
+        ImGui::EndDisabled();
+    }
+
+    // --- Recording ---
+    ImGui::SeparatorText("Export video frames (PNG)");
+
+    ImGui::BeginDisabled(app.isPlaying);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Folder");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputText("##framesDir", &app.framesDir);
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Size");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120);
+    if (ImGui::InputInt2("##videoSize", app.videoSize))
+    {
+        app.videoSize[0] = std::clamp(app.videoSize[0], 16, 8192);
+        app.videoSize[1] = std::clamp(app.videoSize[1], 16, 8192);
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted("FPS");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(50);
+    if (ImGui::InputFloat("##videoFPS", &app.videoFPS, 0.0f, 0.0f, "%.0f"))
+    {
+        app.videoFPS = std::clamp(app.videoFPS, 1.0f, 240.0f);
+    }
     ImGui::EndDisabled();
+
+    ImGui::BeginDisabled(
+        app.isPlaying || app.isLoadingMap || app.camPath.size() < 2 || app.framesDir.empty());
+    if (ImGui::Button("Record"))
+    {
+        camTravellingStart(true);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (app.camPath.size() >= 2)
+    {
+        const double duration = app.camPath.rbegin()->first - app.camPath.begin()->first;
+        const auto   totalFrames =
+            static_cast<size_t>(std::ceil(duration * static_cast<double>(app.videoFPS) - 1e-6) + 1);
+        if (app.isRecording)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Recording frame %zu / %zu", app.recordedFrames,
+                totalFrames);
+        }
+        else
+        {
+            ImGui::TextDisabled("%zu frames", totalFrames);
+        }
+    }
+
+    if (!app.travellingStatus.empty())
+    {
+        ImGui::TextWrapped("%s", app.travellingStatus.c_str());
+        if (ImGui::SmallButton("Copy message"))
+        {
+            glfwSetClipboardString(app.shell.windowHandle(), app.travellingStatus.c_str());
+        }
+    }
 
     ImGui::End();
 }
@@ -1505,6 +1904,28 @@ void renderFileDialogs()
     if (auto path = app.exportDialog.render(); path.has_value())
     {
         onSaveLayers(*path);
+    }
+    if (auto path = app.pathSaveDialog.render(); path.has_value())
+    {
+        std::string errMsg;
+        app.travellingStatus = mm_viewer::saveCameraPath(app.camPath, *path, errMsg)
+                                   ? "Saved camera path to: " + *path
+                                   : errMsg;
+    }
+    if (auto path = app.pathLoadDialog.render(); path.has_value())
+    {
+        std::string errMsg;
+        if (mm_viewer::loadCameraPath(app.camPath, *path, errMsg))
+        {
+            app.selectedKeyframeIdx = -1;
+            app.newKeyframeTime     = nextKeyframeTime();
+            app.travellingStatus =
+                mrpt::format("Loaded %zu keyframes from: %s", app.camPath.size(), path->c_str());
+        }
+        else
+        {
+            app.travellingStatus = errMsg;
+        }
     }
 }
 
@@ -1524,6 +1945,7 @@ void renderFrame()
     rebuild_3d_view();
     updateCameraClipDistances();
     updateMiniCornerView();
+    advanceCameraTravelling();
 
     renderMapViewerPanel();
     renderViewPanel();
@@ -1612,11 +2034,11 @@ int mainShowGui()
     app.glGrid->setColor_u8(0xff, 0xff, 0xff, 0x10);
     app.scene->insert(app.glGrid);
 
-    app.glMapCorner = mrpt::opengl::stock_objects::CornerXYZ(1.0f);
+    app.glMapCorner = mrpt::viz::stock_objects::CornerXYZ(1.0f);
     app.glMapCorner->setName("map");
     app.glMapCorner->enableShowName();
 
-    app.glENUCorner = mrpt::opengl::stock_objects::CornerXYZ(2.0f);
+    app.glENUCorner = mrpt::viz::stock_objects::CornerXYZ(2.0f);
     app.glENUCorner->setName("ENU");
     app.glENUCorner->enableShowName();
     app.scene->insert(app.glENUCorner);
@@ -1626,13 +2048,12 @@ int mainShowGui()
     app.sceneView.setScene(app.scene);
     app.sceneView.onOverlayGui = &renderSceneOverlay;
 
-    app.sceneView.camera().setPointingAt(8.0f, 0.0f, 0.0f);
-    app.sceneView.camera().setAzimuthDegrees(110.0f);
-    app.sceneView.camera().setElevationDegrees(15.0f);
-    app.sceneView.camera().setZoomDistance(50.0f);
+    app.sceneView.cameraController.setCameraPointing(8.0f, 0.0f, 0.0f);
+    app.sceneView.cameraController.setAzimuthDegrees(110.0f);
+    app.sceneView.cameraController.setElevationDegrees(15.0f);
+    app.sceneView.cameraController.setZoomDistance(50.0f);
 
     updateGuiAfterLoadingNewMap();
-    rebuildCamTravellingLabels();
 
     // Load/save persistent UI+camera state across sessions (separate from imgui.ini, which
     // only remembers panel docking):
@@ -1645,7 +2066,7 @@ int mainShowGui()
     }
     mrpt::config::CConfigFile appCfg(appCfgFile);
 
-    auto& cam               = app.sceneView.camera();
+    auto& cam               = app.sceneView.cameraController;
     app.applyGeoRef         = appCfg.read_bool("", "applyGeoRef", app.applyGeoRef);
     app.viewOrtho           = appCfg.read_bool("", "viewOrtho", app.viewOrtho);
     app.view2D              = appCfg.read_bool("", "view2D", app.view2D);
@@ -1667,15 +2088,17 @@ int mainShowGui()
     app.clipFar   = appCfg.read_float("", "clipFar", app.clipFar);
     app.cameraFOV = appCfg.read_float("", "cameraFOV", app.cameraFOV);
 
-    cam.setPointingAt(
-        appCfg.read_float("", "cam_x", cam.getPointingAtX()),
-        appCfg.read_float("", "cam_y", cam.getPointingAtY()),
-        appCfg.read_float("", "cam_z", cam.getPointingAtZ()));
+    cam.setCameraPointing(
+        appCfg.read_float("", "cam_x", cam.getCameraPointingX()),
+        appCfg.read_float("", "cam_y", cam.getCameraPointingY()),
+        appCfg.read_float("", "cam_z", cam.getCameraPointingZ()));
     cam.setAzimuthDegrees(appCfg.read_float("", "cam_az", cam.getAzimuthDegrees()));
     cam.setElevationDegrees(appCfg.read_float("", "cam_el", cam.getElevationDegrees()));
     cam.setZoomDistance(appCfg.read_float("", "cam_d", cam.getZoomDistance()));
 
     app.shell.run(&renderFrame);
+
+    app.frameRenderer.reset();  // while its OpenGL context still exists
 
     appCfg.write("", "applyGeoRef", app.applyGeoRef);
     appCfg.write("", "viewOrtho", app.viewOrtho);
@@ -1695,9 +2118,9 @@ int mainShowGui()
     appCfg.write("", "clipFar", app.clipFar);
     appCfg.write("", "cameraFOV", app.cameraFOV);
 
-    appCfg.write("", "cam_x", cam.getPointingAtX());
-    appCfg.write("", "cam_y", cam.getPointingAtY());
-    appCfg.write("", "cam_z", cam.getPointingAtZ());
+    appCfg.write("", "cam_x", cam.getCameraPointingX());
+    appCfg.write("", "cam_y", cam.getCameraPointingY());
+    appCfg.write("", "cam_z", cam.getCameraPointingZ());
     appCfg.write("", "cam_az", cam.getAzimuthDegrees());
     appCfg.write("", "cam_el", cam.getElevationDegrees());
     appCfg.write("", "cam_d", cam.getZoomDistance());
@@ -1748,13 +2171,13 @@ int main(int argc, char** argv)
         for (const auto& path : arg_add3dScenes)
         {
             ASSERT_FILE_EXISTS_(path);
-            auto scene  = mrpt::opengl::Scene::Create();
+            auto scene  = mrpt::viz::Scene::Create();
             bool readOk = scene->loadFromFile(path);
             ASSERT_(readOk);
 
             ExtraVizLayer evl;
             evl.fileName  = mrpt::system::extractFileName(path);
-            evl.glObjects = mrpt::opengl::CSetOfObjects::Create();
+            evl.glObjects = mrpt::viz::CSetOfObjects::Create();
             evl.glObjects->setName(evl.fileName);
 
             for (const auto& obj : *scene->getViewport())

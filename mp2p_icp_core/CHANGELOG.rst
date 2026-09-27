@@ -2,6 +2,25 @@
 Changelog for package mp2p_icp_core
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.0 (2026-09-28)
+------------------
+* FilterMLS: fix per-point fields (color, intensity, normal) getting misaligned with their points under TBB
+* sm2mm: do not run per-frame filters on IMU-only observations
+* Keep per-point fields in sync for VoxelAverage and flatten_to decimation (fixes out-of-bounds read)
+* Add FilterRangeBiasCorrection: per-class range and incidence surface-bias model
+* FilterDeskew: IMU methods take their initial velocity from 'twist' when defined
+* FilterDeskew: fix ignore_accelerometer=true integrating a phantom free fall
+* Add DecimateMethod::RotatingIndex, removing the shared per-scan displacement of FirstPoint decimation
+* Matcher_Cov2Cov: optional per-point weighting of pairings by range and by beam incidence angle
+* Solver_GaussNewton: make the parallel accumulation of H and g deterministic across thread counts
+* FilterDecimateVoxels: faster ClosestToAverage/VoxelAverage via PointCloudToVoxelGridAverage; smaller voxel_t for FirstPoint
+* Fix pre-existing clang-format-14 violations
+* Add unit tests for previously untested code, fix a Matcher_Adaptive crash
+* ICP: optional freezePairingsAfterIteration parameter
+* Port to MRPT's CMultiMetricMap::mapsList()
+* Port to MRPT 3.x (mrpt::opengl -> mrpt::viz, per-component find_package, yaml API changes, camera controller, etc.)
+* Contributors: Jose Luis Blanco-Claraco
+
 2.14.1 (2026-09-15)
 -------------------
 * Geman-McClure: square the kernel parameter, as its own derivation says (`#102 <https://github.com/MOLAorg/mp2p_icp/issues/102>`_)
