@@ -32,6 +32,13 @@ set(CMAKE_SHARED_LINKER_FLAGS_COVERAGE "--coverage" CACHE STRING "Linker flags f
 # Tell CMake we'll use C++ for use in its tests/flags
 project(mp2p_icp_core LANGUAGES CXX)
 
+# This package builds as a plain "cmake" build_type under colcon (not
+# ament_cmake or catkin), but colcon still passes these catkin-only
+# variables when invoked with --symlink-install. Consume them here to
+# silence the "Manually-specified variables were not used" CMake warning.
+set(_mp2p_icp_ignored_vars "${CATKIN_INSTALL_INTO_PREFIX_ROOT}" "${CATKIN_SYMLINK_INSTALL}")
+unset(_mp2p_icp_ignored_vars)
+
 # MOLA CMake scripts: "mola_xxx()"
 # NOTE: standalone (non-colcon) builds are not supported; mola_common is
 # expected to be provided by the ROS/colcon workspace, same as every other
@@ -43,15 +50,16 @@ add_subdirectory(3rdparty)
 
 # find dependencies:
 # NOTE: "gui" is intentionally NOT requested here so this package (and
-# everything that depends on it) has no GUI/display dependency. mrpt::opengl,
-# mrpt::system and mrpt::expr remain available transitively via maps->obs
-# and tfest->poses->bayes->config.
-find_package(MRPT 2.15.4 REQUIRED COMPONENTS
-  containers
-  tfest
-  maps
-  topography
-)
+# everything that depends on it) has no GUI/display dependency. mrpt::mrpt_viz,
+# mrpt::mrpt_system and mrpt::mrpt_expr remain available transitively via
+# maps->obs and tfest->poses->bayes->config.
+find_package(mrpt_containers REQUIRED)
+find_package(mrpt_tfest REQUIRED)
+find_package(mrpt_maps REQUIRED)
+find_package(mrpt_topography REQUIRED)
+# MRPT 3.x no longer re-exports Eigen transitively from mrpt_math/mrpt_poses;
+# code including <Eigen/...> directly needs this itself.
+find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Threads REQUIRED)
 find_package(TBB) # optional
 
