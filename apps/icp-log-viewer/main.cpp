@@ -34,15 +34,9 @@
 #include <imgui_app_common/ImGuiAppShell.h>
 #include <imgui_app_common/SimpleFileDialog.h>
 #include <imgui_internal.h>  // DockBuilder* API (default docking layout)
-#include <mrpt/config.h>
 #include <mrpt/config/CConfigFile.h>
 #include <mrpt/core/Clock.h>
 #include <mrpt/core/round.h>
-#include <mrpt/opengl/CEllipsoid3D.h>
-#include <mrpt/opengl/CGridPlaneXY.h>
-#include <mrpt/opengl/COpenGLScene.h>
-#include <mrpt/opengl/CText.h>
-#include <mrpt/opengl/stock_objects.h>
 #include <mrpt/poses/CPosePDFGaussian.h>
 #include <mrpt/poses/Lie/SO.h>
 #include <mrpt/system/CDirectoryExplorer.h>
@@ -50,6 +44,11 @@
 #include <mrpt/system/os.h>
 #include <mrpt/system/progress.h>
 #include <mrpt/system/string_utils.h>  // unitsFormat()
+#include <mrpt/viz/CEllipsoid3D.h>
+#include <mrpt/viz/CGridPlaneXY.h>
+#include <mrpt/viz/CText.h>
+#include <mrpt/viz/Scene.h>
+#include <mrpt/viz/stock_objects.h>
 
 #include <CLI/CLI.hpp>
 #include <iostream>
@@ -113,10 +112,10 @@ class DelayedLoadLog
  *  immediate-mode-GUI rationale). */
 struct AppState
 {
-    mp2p_icp_viz::ImGuiAppShell      shell;
-    mrpt::imgui::CImGuiSceneView     sceneView;
-    mrpt::opengl::Scene::Ptr         scene    = mrpt::opengl::COpenGLScene::Create();
-    mrpt::opengl::CSetOfObjects::Ptr glVizICP = mrpt::opengl::CSetOfObjects::Create();
+    mp2p_icp_viz::ImGuiAppShell   shell;
+    mrpt::imgui::CImGuiSceneView  sceneView;
+    mrpt::viz::Scene::Ptr         scene    = mrpt::viz::Scene::Create();
+    mrpt::viz::CSetOfObjects::Ptr glVizICP = mrpt::viz::CSetOfObjects::Create();
 
     std::vector<DelayedLoadLog> logRecords;
 
@@ -238,21 +237,21 @@ void ensureMiniCornerViewport()
     gl_view->setViewportPosition(0, 0, 0.1, 0.1 * 16.0 / 9.0);
     gl_view->setTransparent(true);
     {
-        mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("X");
+        mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("X");
         obj->setLocation(1.1, 0, 0);
         gl_view->insert(obj);
     }
     {
-        mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Y");
+        mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Y");
         obj->setLocation(0, 1.1, 0);
         gl_view->insert(obj);
     }
     {
-        mrpt::opengl::CText::Ptr obj = mrpt::opengl::CText::Create("Z");
+        mrpt::viz::CText::Ptr obj = mrpt::viz::CText::Create("Z");
         obj->setLocation(0, 0, 1.1);
         gl_view->insert(obj);
     }
-    gl_view->insert(mrpt::opengl::stock_objects::CornerXYZ());
+    gl_view->insert(mrpt::viz::stock_objects::CornerXYZ());
 }
 
 void updateMiniCornerView()
@@ -262,9 +261,9 @@ void updateMiniCornerView()
     {
         return;
     }
-    mrpt::opengl::CCamera& view_cam = gl_view->getCamera();
-    view_cam.setAzimuthDegrees(app.sceneView.camera().getAzimuthDegrees());
-    view_cam.setElevationDegrees(app.sceneView.camera().getElevationDegrees());
+    mrpt::viz::CCamera& view_cam = gl_view->getCamera();
+    view_cam.setAzimuthDegrees(app.sceneView.cameraController.getAzimuthDegrees());
+    view_cam.setElevationDegrees(app.sceneView.cameraController.getElevationDegrees());
     view_cam.setZoomDistance(5);
 }
 
@@ -489,17 +488,17 @@ try
         conditionNumber(relativePose.cov));
 
     // 3D objects -------------------
-    auto glCornerFrom = mrpt::opengl::stock_objects::CornerXYZSimple(0.75f, 3.0f);
+    auto glCornerFrom = mrpt::viz::stock_objects::CornerXYZSimple(0.75f, 3.0f);
     glCornerFrom->setPose(poseFromCorner);
     app.glVizICP->insert(glCornerFrom);
 
-    auto glCornerLocal = mrpt::opengl::stock_objects::CornerXYZSimple(0.85f, 5.0f);
+    auto glCornerLocal = mrpt::viz::stock_objects::CornerXYZSimple(0.85f, 5.0f);
     glCornerLocal->setPose(relativePose.mean);
     glCornerLocal->setName("Local");
     glCornerLocal->enableShowName(true);
     app.glVizICP->insert(glCornerLocal);
 
-    auto glCornerToCov = mrpt::opengl::CEllipsoid3D::Create();
+    auto glCornerToCov = mrpt::viz::CEllipsoid3D::Create();
     glCornerToCov->set3DsegmentsCount(16);
     glCornerToCov->enableDrawSolid3D(true);
     glCornerToCov->setColor_u8(0xff, 0x00, 0x00, 0x40);
@@ -511,7 +510,7 @@ try
     {
         const auto priorCov = mrpt::math::CMatrixDouble66(lr.prior->cov_inv.inverse());
 
-        auto glPriorEllipsoid = mrpt::opengl::CEllipsoid3D::Create();
+        auto glPriorEllipsoid = mrpt::viz::CEllipsoid3D::Create();
         glPriorEllipsoid->set3DsegmentsCount(16);
         glPriorEllipsoid->enableDrawSolid3D(true);
         glPriorEllipsoid->setColor_u8(0xff, 0xff, 0x00, 0x50);
@@ -552,7 +551,7 @@ try
     rpGlobal.points.allLayers.color = mrpt::img::TColor(0xff, 0x00, 0x00, 0xff);
 
     static std::optional<mp2p_icp::render_params_t> prevRpGlobal;
-    static mrpt::opengl::CSetOfObjects::Ptr         lastGlobalPts;
+    static mrpt::viz::CSetOfObjects::Ptr            lastGlobalPts;
 
     if (indexChanged || !prevRpGlobal.has_value() || *prevRpGlobal != rpGlobal)
     {
@@ -590,7 +589,7 @@ try
     }
 
     static std::optional<mp2p_icp::render_params_t> prevRpLocal;
-    static mrpt::opengl::CSetOfObjects::Ptr         lastLocalPts;
+    static mrpt::viz::CSetOfObjects::Ptr            lastLocalPts;
 
     if (indexChanged || !prevRpLocal.has_value() || *prevRpLocal != rpLocal)
     {
@@ -601,13 +600,13 @@ try
     lastLocalPts->setPose(relativePose.mean);
 
     // Global view options:
-    auto& cam = app.sceneView.camera();
+    auto& cam = app.sceneView.cameraController;
     cam.setProjectiveModel(!app.viewOrtho);
 
     if (app.cameraFollowsLocal)
     {
         const auto camLoc = relativePose.mean.translation().cast<float>();
-        cam.setPointingAt(camLoc.x, camLoc.y, camLoc.z);
+        cam.setCameraPointing(camLoc.x, camLoc.y, camLoc.z);
     }
 
     const auto depthFieldMid       = std::pow(10.0, app.midDepthField);
@@ -1051,12 +1050,12 @@ int mainShowGui()
 
     // Background scene:
     {
-        auto glGrid = mrpt::opengl::CGridPlaneXY::Create();
+        auto glGrid = mrpt::viz::CGridPlaneXY::Create();
         glGrid->setColor_u8(0xff, 0xff, 0xff, 0x10);
         app.scene->insert(glGrid);
     }
 
-    auto glBase = mrpt::opengl::stock_objects::CornerXYZ(1.0f);
+    auto glBase = mrpt::viz::stock_objects::CornerXYZ(1.0f);
     glBase->setName("Global");
     glBase->enableShowName();
     app.scene->insert(glBase);
@@ -1065,10 +1064,10 @@ int mainShowGui()
 
     app.sceneView.setScene(app.scene);
 
-    app.sceneView.camera().setPointingAt(8.0f, 0.0f, 0.0f);
-    app.sceneView.camera().setAzimuthDegrees(110.0f);
-    app.sceneView.camera().setElevationDegrees(15.0f);
-    app.sceneView.camera().setZoomDistance(30.0f);
+    app.sceneView.cameraController.setCameraPointing(8.0f, 0.0f, 0.0f);
+    app.sceneView.cameraController.setAzimuthDegrees(110.0f);
+    app.sceneView.cameraController.setElevationDegrees(15.0f);
+    app.sceneView.cameraController.setZoomDistance(30.0f);
 
     // Load/save persistent UI+camera state across sessions:
     char appCfgFile[1024];
@@ -1080,7 +1079,7 @@ int mainShowGui()
     }
     mrpt::config::CConfigFile appCfg(appCfgFile);
 
-    auto& cam              = app.sceneView.camera();
+    auto& cam              = app.sceneView.cameraController;
     app.colorizeLocalMap   = appCfg.read_bool("", "cbColorizeLocalMap", app.colorizeLocalMap);
     app.colorizeGlobalMap  = appCfg.read_bool("", "cbColorizeGlobalMap", app.colorizeGlobalMap);
     app.showInitialPose    = appCfg.read_bool("", "cbShowInitialPose", app.showInitialPose);
@@ -1105,10 +1104,10 @@ int mainShowGui()
     app.thicknessDepthField =
         appCfg.read_float("", "slThicknessDepthField", app.thicknessDepthField);
 
-    cam.setPointingAt(
-        appCfg.read_float("", "cam_x", cam.getPointingAtX()),
-        appCfg.read_float("", "cam_y", cam.getPointingAtY()),
-        appCfg.read_float("", "cam_z", cam.getPointingAtZ()));
+    cam.setCameraPointing(
+        appCfg.read_float("", "cam_x", cam.getCameraPointingX()),
+        appCfg.read_float("", "cam_y", cam.getCameraPointingY()),
+        appCfg.read_float("", "cam_z", cam.getCameraPointingZ()));
     cam.setAzimuthDegrees(appCfg.read_float("", "cam_az", cam.getAzimuthDegrees()));
     cam.setElevationDegrees(appCfg.read_float("", "cam_el", cam.getElevationDegrees()));
     cam.setZoomDistance(appCfg.read_float("", "cam_d", cam.getZoomDistance()));
@@ -1136,9 +1135,9 @@ int mainShowGui()
     appCfg.write("", "slMidDepthField", app.midDepthField);
     appCfg.write("", "slThicknessDepthField", app.thicknessDepthField);
 
-    appCfg.write("", "cam_x", cam.getPointingAtX());
-    appCfg.write("", "cam_y", cam.getPointingAtY());
-    appCfg.write("", "cam_z", cam.getPointingAtZ());
+    appCfg.write("", "cam_x", cam.getCameraPointingX());
+    appCfg.write("", "cam_y", cam.getCameraPointingY());
+    appCfg.write("", "cam_z", cam.getCameraPointingZ());
     appCfg.write("", "cam_az", cam.getAzimuthDegrees());
     appCfg.write("", "cam_el", cam.getElevationDegrees());
     appCfg.write("", "cam_d", cam.getZoomDistance());
