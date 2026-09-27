@@ -56,8 +56,8 @@ void SimpleFileDialog::open(
         overwritePopupId_      = "Overwrite file?##overwrite" + instanceTag;
     }
 
-    open_ = true;
-    ImGui::OpenPopup(popupId_.c_str());
+    open_        = true;
+    pendingOpen_ = true;
 }
 
 std::optional<std::string> SimpleFileDialog::render()
@@ -65,6 +65,14 @@ std::optional<std::string> SimpleFileDialog::render()
     if (!open_)
     {
         return std::nullopt;
+    }
+
+    // Popup IDs are scoped by the current ImGui window, so the popup is opened here, next to
+    // BeginPopupModal(), instead of in open(), which may run inside another window:
+    if (pendingOpen_)
+    {
+        pendingOpen_ = false;
+        ImGui::OpenPopup(popupId_.c_str());
     }
 
     std::optional<std::string> result;
@@ -94,8 +102,12 @@ std::optional<std::string> SimpleFileDialog::render()
             std::error_code                               ec;
             std::vector<std::filesystem::directory_entry> dirs;
             std::vector<std::filesystem::directory_entry> files;
-            for (const auto& entry : std::filesystem::directory_iterator(currentDir_, ec))
+
+            std::filesystem::directory_iterator       dirIt(currentDir_, ec);
+            const std::filesystem::directory_iterator dirEnd;
+            for (; !ec && dirIt != dirEnd; dirIt.increment(ec))
             {
+                const auto&     entry = *dirIt;
                 std::error_code statusEc;
                 const bool      isDir = entry.is_directory(statusEc);
                 if (statusEc)
@@ -113,6 +125,10 @@ std::optional<std::string> SimpleFileDialog::render()
                 {
                     files.push_back(entry);
                 }
+            }
+            if (ec)
+            {
+                errorMsg_ = "Unable to read directory: " + ec.message();
             }
             std::sort(
                 dirs.begin(), dirs.end(),
@@ -207,16 +223,24 @@ std::optional<std::string> SimpleFileDialog::render()
                         result = candidate.string();
                     }
                 }
-                else if (std::filesystem::exists(candidate, candidateEc))
-                {
-                    // Ask for explicit confirmation before overwriting -- unlike a native OS
-                    // save dialog, this in-app one has no built-in overwrite protection.
-                    pendingOverwritePath_ = candidate.string();
-                    ImGui::OpenPopup(overwritePopupId_.c_str());
-                }
                 else
                 {
-                    result = candidate.string();
+                    const bool candidateExists = std::filesystem::exists(candidate, candidateEc);
+                    if (candidateEc)
+                    {
+                        errorMsg_ = "Unable to inspect file.";
+                    }
+                    else if (candidateExists)
+                    {
+                        // Ask for explicit confirmation before overwriting -- unlike a native OS
+                        // save dialog, this in-app one has no built-in overwrite protection.
+                        pendingOverwritePath_ = candidate.string();
+                        ImGui::OpenPopup(overwritePopupId_.c_str());
+                    }
+                    else
+                    {
+                        result = candidate.string();
+                    }
                 }
             }
         }
