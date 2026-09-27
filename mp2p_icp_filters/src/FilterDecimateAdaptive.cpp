@@ -40,6 +40,23 @@ IMPLEMENTS_MRPT_OBJECT(FilterDecimateAdaptive, mp2p_icp_filters::FilterBase, mp2
 
 using namespace mp2p_icp_filters;
 
+namespace
+{
+/** Which point of a voxel the rotating rule takes.
+ *
+ * Derived from the voxel's own integer coordinates, so neighboring voxels take
+ * different offsets while the answer stays independent of traversal order,
+ * thread count and map type.
+ */
+uint32_t rotatingVoxelOffset(const PointCloudToVoxelGrid::indices_t& idx, size_t n)
+{
+    const int64_t s = static_cast<int64_t>(idx.cx_) + static_cast<int64_t>(idx.cy_) +
+                      static_cast<int64_t>(idx.cz_);
+    const int64_t m = static_cast<int64_t>(n);
+    return static_cast<uint32_t>(((s % m) + m) % m);
+}
+}  // namespace
+
 void FilterDecimateAdaptive::OutputTarget::load_from_yaml(
     const mrpt::containers::yaml& c, FilterDecimateAdaptive& parent)
 {
@@ -154,18 +171,19 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
     {
         // voxel_t is a non-owning span; copy by value so we don't hold a
         // dangling pointer to the temporary built inside visit_voxels.
-        PointCloudToVoxelGrid::voxel_t voxel;
-        uint32_t                       nextIdx   = 0;
-        bool                           exhausted = false;
+        PointCloudToVoxelGrid::voxel_t   voxel;
+        PointCloudToVoxelGrid::indices_t indices{0, 0, 0};
+        uint32_t                         nextIdx   = 0;
+        bool                             exhausted = false;
 
         /// Where to start taking points from within the voxel (!=0 only for
-        /// DecimateMethod::RandomPoint).
+        /// DecimateMethod::RandomPoint and DecimateMethod::RotatingIndex).
         uint32_t startOffset = 0;
 
         /// Representative of the whole voxel, precomputed once since it does
         /// not depend on the output target. Only for the two average-based
-        /// decimation methods: an index into the input cloud for
-        /// ClosestToAverage, the average point itself for VoxelAverage.
+        /// decimation methods: the input point closest to `average`. For
+        /// VoxelAverage, only its per-point fields are used.
         uint32_t              representativeIdx = 0;
         mrpt::math::TPoint3Df average           = {0, 0, 0};
     };
@@ -176,7 +194,7 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
     std::size_t nTotalVoxels = 0;
 
     const auto lambdaVisitVoxel =
-        [&](const PointCloudToVoxelGrid::indices_t&, const PointCloudToVoxelGrid::voxel_t& data)
+        [&](const PointCloudToVoxelGrid::indices_t& idx, const PointCloudToVoxelGrid::voxel_t& data)
     {
         if (!data.empty())
         {
@@ -187,7 +205,9 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
             return;
         }
 
-        voxels.emplace_back().voxel = data;
+        auto& v   = voxels.emplace_back();
+        v.voxel   = data;
+        v.indices = idx;
     };
 
     // Parse input cloud through subsampling:
@@ -276,6 +296,13 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
             v.startOffset = static_cast<uint32_t>(rng.drawUniform64bit() % v.voxel.size());
         }
     }
+    else if (_.decimate_method == DecimateMethod::RotatingIndex)
+    {
+        for (auto& v : voxels)
+        {
+            v.startOffset = rotatingVoxelOffset(v.indices, v.voxel.size());
+        }
+    }
     else if (usesAverage)
     {
         const auto& xs = pc.getPointsBufferRef_x();
@@ -297,11 +324,8 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
             mean *= inv_n;
             v.average = mean;
 
-            if (_.decimate_method != DecimateMethod::ClosestToAverage)
-            {
-                continue;
-            }
-
+            // Also needed for VoxelAverage: the per-point fields (intensity,
+            // color, ...) of this point are the ones carried over.
             std::optional<float> minSqrErr;
             for (size_t i = 0; i < v.voxel.size(); i++)
             {
@@ -419,13 +443,11 @@ void FilterDecimateAdaptive::filter(mp2p_icp::metric_map_t& inOut) const
                 {
                     // These two methods summarize the whole voxel, so each one
                     // can only ever emit one point:
+                    outPc->insertPointFrom(ith.representativeIdx, ctx);
                     if (_.decimate_method == DecimateMethod::VoxelAverage)
                     {
-                        outPc->insertPointFast(ith.average.x, ith.average.y, ith.average.z);
-                    }
-                    else
-                    {
-                        outPc->insertPointFrom(ith.representativeIdx, ctx);
+                        outPc->setPointFast(
+                            outPc->size() - 1, ith.average.x, ith.average.y, ith.average.z);
                     }
                     ith.exhausted = true;
                 }
