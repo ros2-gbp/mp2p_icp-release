@@ -1,6 +1,9 @@
 # Shared GLFW + Dear ImGui (docking) application shell used by both
 # mm-viewer and icp-log-viewer. Internal build detail only: not installed
 # or exported.
+#
+# Dear ImGui itself comes from the mrpt_imgui_vendor package (one vendored
+# copy for the whole MRPT ecosystem), found by the parent CMakeLists.
 project(imgui_app_common LANGUAGES CXX)
 
 add_library(${PROJECT_NAME} STATIC
