@@ -45,6 +45,10 @@ struct SimulationParams
 
     mp2p_icp_filters::MotionCompensationMethod deskew_method =
         mp2p_icp_filters::MotionCompensationMethod::None;
+    bool ignore_accelerometer = false;
+    // Feed zero velocities to the LocalVelocityBuffer, so the only source of the
+    // true velocity is the filter `twist`:
+    bool zero_buffer_velocity = false;
 
     std::string outputMapClass = "mrpt::maps::CGenericPointsMap";
 };
@@ -329,6 +333,7 @@ mrpt::maps::CSimplePointsMap simulate_gt_local_points(
     deskew.input_pointcloud_layer        = "raw";
     deskew.output_pointcloud_layer       = "deskewed";
     deskew.method                        = p.deskew_method;
+    deskew.ignore_accelerometer          = p.ignore_accelerometer;
     deskew.output_layer_class            = p.outputMapClass;
 
     deskew.attachToParameterSource(ps);
@@ -364,8 +369,15 @@ mrpt::maps::CSimplePointsMap simulate_gt_local_points(
         // Update local velocity buffer:
         const double stamp_s = mrpt::Clock::toDouble(stamp);
         ps.localVelocityBuffer.add_orientation(stamp_s, pose.getRotationMatrix());
-        ps.localVelocityBuffer.add_linear_velocity(
-            stamp_s, {kfGtTwist.vx, kfGtTwist.vy, kfGtTwist.vz});
+        if (p.zero_buffer_velocity)
+        {
+            ps.localVelocityBuffer.add_linear_velocity(stamp_s, {0, 0, 0});
+        }
+        else
+        {
+            ps.localVelocityBuffer.add_linear_velocity(
+                stamp_s, {kfGtTwist.vx, kfGtTwist.vy, kfGtTwist.vz});
+        }
 
         ps.localVelocityBuffer.set_reference_zero_time(stamp_s);
 
@@ -494,8 +506,15 @@ mrpt::maps::CSimplePointsMap simulate_gt_local_points(
         // Update local velocity buffer:
         const double stamp_s = mrpt::Clock::toDouble(stamp);
         ps.localVelocityBuffer.add_orientation(stamp_s, pose.getRotationMatrix());
-        ps.localVelocityBuffer.add_linear_velocity(
-            stamp_s, {kfGtTwist.vx, kfGtTwist.vy, kfGtTwist.vz});
+        if (p.zero_buffer_velocity)
+        {
+            ps.localVelocityBuffer.add_linear_velocity(stamp_s, {0, 0, 0});
+        }
+        else
+        {
+            ps.localVelocityBuffer.add_linear_velocity(
+                stamp_s, {kfGtTwist.vx, kfGtTwist.vy, kfGtTwist.vz});
+        }
 
         ps.localVelocityBuffer.set_reference_zero_time(stamp_s);
 
@@ -585,6 +604,7 @@ filters:
       input_pointcloud_layer: "raw"
       output_pointcloud_layer: "deskewed"
       method: %s
+      ignore_accelerometer: %s
       silently_ignore_no_timestamps: false
 
       output_layer_class: "%s" # Keep intensity & ring channels
@@ -598,7 +618,8 @@ filters:
       # one or more layers to remove
       pointcloud_layer_to_remove: ["raw"]
     )yaml",
-        mrpt::typemeta::enum2str(p.deskew_method).c_str(), p.outputMapClass.c_str()));
+        mrpt::typemeta::enum2str(p.deskew_method).c_str(),
+        p.ignore_accelerometer ? "true" : "false", p.outputMapClass.c_str()));
 
     mp2p_icp::metric_map_t            mm;
     mp2p_icp_filters::sm2mm_options_t sm2mm_opts;
@@ -657,6 +678,23 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
         methods.push_back(mp2p_icp_filters::MotionCompensationMethod::IMUh);
 #endif
 
+        struct TestCase
+        {
+            mp2p_icp_filters::MotionCompensationMethod method;
+            bool                                       ignoreAcc     = false;
+            bool                                       zeroBufferVel = false;
+        };
+        std::vector<TestCase> cases;
+        for (const auto method : methods)
+        {
+            cases.push_back({method, false, false});
+        }
+#if MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION
+        cases.push_back({mp2p_icp_filters::MotionCompensationMethod::IMU, true, false});
+        // The velocity seed must come from `twist` when it is defined:
+        cases.push_back({mp2p_icp_filters::MotionCompensationMethod::IMU, false, true});
+#endif
+
         const std::vector<std::string> outputMapClasses = {"mrpt::maps::CGenericPointsMap"};
 
         const std::vector<std::pair<float, float>> test_velocities = {
@@ -682,9 +720,11 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                 p.angular_vel  = ang;
                 std::cout << "\n=== Test velocities: lin=" << lin << " ang=" << ang << "\n";
 
-                for (const auto method : methods)
+                for (const auto& [method, ignoreAcc, zeroBufferVel] : cases)
                 {
-                    p.deskew_method = method;
+                    p.deskew_method        = method;
+                    p.ignore_accelerometer = ignoreAcc;
+                    p.zero_buffer_velocity = zeroBufferVel;
 
                     for (const auto& className : outputMapClasses)
                     {
@@ -694,10 +734,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                         const auto eval =
                             use_sm2mm ? run_deskew_in_sm2mm_test(p) : run_deskew_test(p);
 
+                        const std::string label = mrpt::typemeta::enum2str(method) +
+                                                  (ignoreAcc ? " (no accel)" : "") +
+                                                  (zeroBufferVel ? " (v from twist)" : "");
                         printf(
-                            " %-32s | %-30s | rmse: %10.6f | errs: ",
-                            mrpt::typemeta::enum2str(method).c_str(), p.outputMapClass.c_str(),
-                            eval.rmse);
+                            " %-32s | %-30s | rmse: %10.6f | errs: ", label.c_str(),
+                            p.outputMapClass.c_str(), eval.rmse);
 
                         for (std::size_t i = 0;
                              i < std::min<std::size_t>(eval.individual_frame_rmse.size(), 6U); i++)
@@ -707,10 +749,13 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
                         printf("... [mm] ");
 
                         // Check:
+                        // Ignoring the accelerometer reduces IMU to a constant-velocity
+                        // model, so it gets the same tolerance as Linear:
                         const float threshold =
                             (method == mp2p_icp_filters::MotionCompensationMethod::None
                                  ? 0.20f
-                                 : (method == mp2p_icp_filters::MotionCompensationMethod::Linear
+                                 : (method == mp2p_icp_filters::MotionCompensationMethod::Linear ||
+                                            ignoreAcc
                                         ? 0.005f
                                         : 0.001f));
                         if (eval.rmse > threshold)
