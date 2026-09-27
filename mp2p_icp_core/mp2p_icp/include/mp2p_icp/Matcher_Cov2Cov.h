@@ -21,6 +21,8 @@
 
 #include <mp2p_icp/Matcher.h>
 #include <mp2p_icp/MatchingDistanceProfile.h>
+#include <mp2p_icp/PointWeightByIncidence.h>
+#include <mp2p_icp/PointWeightByRange.h>
 #include <mrpt/math/TPoint3D.h>
 
 #include <cstdlib>
@@ -76,6 +78,56 @@ class Matcher_Cov2Cov : public Matcher
      * `thresholdFar` is set. */
     float thresholdTransitionWidth = 5.0f;
 
+    /** Optional: how much a correspondence counts as a function of the range
+     * at which its point was measured. Disabled by default
+     * (`pointWeightAlpha = 0`), which weighs every point the same.
+     *
+     * This is distinct from `thresholdFar` above: that one decides which
+     * correspondences are ACCEPTED, this one decides what they WEIGH once
+     * accepted. See mp2p_icp::PointWeightByRange for the curve and for the
+     * reading of the two physically meaningful exponents.
+     *
+     * Motivation: a fixed-size decimation voxel cannot thin points past the
+     * range at which the beam spacing exceeds the voxel, so the far field is
+     * over-represented in the correspondence set exactly where each point is
+     * least certain and its lever arm on attitude is longest.
+     */
+    float pointWeightAlpha = 0.0f;
+
+    /** Range [meters] below which the point weight saturates. Only used when
+     * `pointWeightAlpha` is nonzero. */
+    float pointWeightRefRange = 20.0f;
+
+    /** Floor of the point weight, so a far point is never dropped outright. */
+    float pointWeightMin = 0.01f;
+
+    /** Ceiling of the point weight. Keep at 1 for a plain knee. */
+    float pointWeightMax = 1.0f;
+
+    /** Optional: how much a correspondence counts as a function of how
+     * obliquely its beam struck the surface. Disabled by default
+     * (`incidenceWeightAlpha = 0`), which weighs every point the same.
+     *
+     * Independent of the range weighting above, and composable with it: that
+     * one asks how far the point is, this one how squarely it was seen. See
+     * mp2p_icp::PointWeightByIncidence.
+     *
+     * The surface normal is taken as the dominant eigenvector of the pairing's
+     * own information matrix, which for a locally planar neighborhood points
+     * along the normal, so nothing extra has to be stored or recomputed.
+     */
+    float incidenceWeightAlpha = 0.0f;
+
+    /** |cos| of the incidence angle at which the weight starts to fall. Only
+     * used when `incidenceWeightAlpha` is nonzero. */
+    float incidenceWeightRefCos = 0.5f;
+
+    /** Floor, so a grazing point is never dropped outright. */
+    float incidenceWeightMin = 0.05f;
+
+    /** Ceiling. Keep at 1 for a plain knee. */
+    float incidenceWeightMax = 1.0f;
+
     /** Common parameters to all derived classes:
      *
      * - `threshold`: Inliers distance threshold [meters][mandatory]
@@ -88,6 +140,14 @@ class Matcher_Cov2Cov : public Matcher
      * - `layerMatches`: Optional map of layer names to match.
      *  Refer to example YAML files.
      *
+     * - `pointWeightAlpha`, `pointWeightRefRange`, `pointWeightMin`,
+     *   `pointWeightMax`: Optional per-point weighting by range, see the field
+     *   docs above. Also accept dynamic formulas.
+     *
+     * - `incidenceWeightAlpha`, `incidenceWeightRefCos`, `incidenceWeightMin`,
+     *   `incidenceWeightMax`: Optional per-point weighting by incidence angle,
+     *   see the field docs above. Also accept dynamic formulas.
+     *
      * - `bounding_box_intersection_check_epsilon`: Optional (Default=0.20). The
      * additional "margin" in all axes (x,y,z) that bounding box is enlarged for
      * checking the feasibility of pairings to exist.
@@ -97,6 +157,14 @@ class Matcher_Cov2Cov : public Matcher
     /** The effective matching-distance profile built from `threshold` and,
      * if set, `thresholdFar`/`thresholdKneeRange`/`thresholdTransitionWidth`. */
     [[nodiscard]] MatchingDistanceProfile matchingDistanceProfile() const;
+
+    /** The effective per-point range weighting built from the
+     * `pointWeight*` fields. */
+    [[nodiscard]] PointWeightByRange pointWeightByRange() const;
+
+    /** The effective per-point incidence weighting built from the
+     * `incidenceWeight*` fields. */
+    [[nodiscard]] PointWeightByIncidence pointWeightByIncidence() const;
 
    protected:
     bool impl_match(
