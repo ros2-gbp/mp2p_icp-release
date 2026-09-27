@@ -40,6 +40,7 @@ set(LIB_SRCS
   src/FilterPlanePatches.cpp
   src/FilterPoleDetector.cpp
   src/FilterPolygon2D.cpp
+  src/FilterRangeBiasCorrection.cpp
   src/FilterRemoveByVoxelOccupancy.cpp
   src/FilterRemovePointCloudField.cpp
   src/FilterRenameLayer.cpp
@@ -55,6 +56,7 @@ set(LIB_SRCS
   src/GetOrCreatePointLayer.cpp
   src/PointCloudRobustRange.cpp
   src/PointCloudToVoxelGrid.cpp
+  src/PointCloudToVoxelGridAverage.cpp
   src/PointCloudToVoxelGridSingle.cpp
   src/sm2mm.cpp
   #
@@ -87,6 +89,7 @@ set(LIB_PUBLIC_HDRS
   include/mp2p_icp_filters/FilterPlanePatches.h
   include/mp2p_icp_filters/FilterPoleDetector.h
   include/mp2p_icp_filters/FilterPolygon2D.h
+  include/mp2p_icp_filters/FilterRangeBiasCorrection.h
   include/mp2p_icp_filters/FilterRemoveByVoxelOccupancy.h
   include/mp2p_icp_filters/FilterRenameLayer.h
   include/mp2p_icp_filters/FilterRemovePointCloudField.h
@@ -100,6 +103,7 @@ set(LIB_PUBLIC_HDRS
   include/mp2p_icp_filters/GetOrCreatePointLayer.h
   include/mp2p_icp_filters/PointCloudRobustRange.h
   include/mp2p_icp_filters/PointCloudToVoxelGrid.h
+  include/mp2p_icp_filters/PointCloudToVoxelGridAverage.h
   include/mp2p_icp_filters/PointCloudToVoxelGridSingle.h
   include/mp2p_icp_filters/sm2mm.h
 )
@@ -119,6 +123,7 @@ mola_add_library(
   PRIVATE_LINK_LIBRARIES
     ${imu_pub_link_}
     tsl::robin_map
+    Eigen3::Eigen
   CMAKE_DEPENDENCIES
     mp2p_icp
     mp2p_icp_common
