@@ -547,14 +547,31 @@ void FilterDeskew::filter(mp2p_icp::metric_map_t& inOut) const
 
             if (!sample_history.by_time.empty())
             {
-                // Optionally suppress accelerometer contribution entirely.
-                // Zeroing a_b here makes trajectory_from_buffer integrate with
-                // ac_b = gravity_b only (gravity cancels out in the body frame),
-                // reducing position integration to gyro + constant-velocity-per-interval.
+                // A defined `twist` provides the velocity at t=0, replacing whatever
+                // velocity samples the buffer holds:
+                if (twist.has_value())
+                {
+                    const mrpt::math::TVector3D v0(twist->vx, twist->vy, twist->vz);
+                    sample_history.by_type.v_b.clear();
+                    sample_history.by_type.v_b[0.0] = v0;
+                    for (auto& [stamp, sample] : sample_history.by_time)
+                    {
+                        sample.v_b.reset();
+                    }
+                    sample_history.by_time[0.0].v_b = v0;
+                }
+
+                // Optionally suppress accelerometer contribution entirely,
+                // reducing position integration to gyro + constant velocity.
                 // This avoids lever-arm noise from corrupting the deskew path when the
                 // IMU/LiDAR offset is large and the accelerometer signal is unreliable.
+                // Both the specific force (a_b) and gravity must be zeroed: the
+                // coordinate acceleration is ac_b = a_b + R^T*g, so zeroing a_b alone
+                // leaves a free fall of g*t^2/2 (~5 cm over a 0.1 s sweep).
                 if (ignore_accelerometer)
                 {
+                    imu_params.gravity_vector = {0, 0, 0};
+
                     // Zero every a_b in by_type (used by find_closest fallback in
                     // trajectory_from_buffer) — do NOT clear the map, as find_closest
                     // on an empty map would crash.
