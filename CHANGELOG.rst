@@ -2,6 +2,16 @@
 Changelog for package mp2p_icp_core
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.2 (2026-10-06)
+------------------
+* Fix voxel grid hash masked to 20 bits, which blew up tsl::robin_map memory (`#127 <https://github.com/MOLAorg/mp2p_icp/issues/127>`_)
+* Contributors: Jose Luis Blanco-Claraco
+
+3.0.1 (2026-09-28)
+------------------
+* Disable LTO for GCC < 12, which miscompiled devirtualized calls into MRPT classes (hanging/aborting unit tests on ROS 2 Humble)
+* Contributors: Jose Luis Blanco-Claraco
+
 3.0.0 (2026-09-28)
 ------------------
 * FilterMLS: fix per-point fields (color, intensity, normal) getting misaligned with their points under TBB
