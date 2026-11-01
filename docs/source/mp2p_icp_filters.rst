@@ -629,7 +629,7 @@ Filter: `FilterDeskew`
 * **in\_place** (``bool``, default: `false`):
   If `true`, the deskewed points replace the input layer (most efficient).
 
-* **output\_layer\_class** (:cpp:type:`std::string`, default: `mrpt::maps::CPointsMapXYZI`):
+* **output\_layer\_class** (:cpp:type:`std::string`, default: `mrpt::maps::CGenericPointsMap`):
   The class name for the output layer if it needs to be created.
 
 * **silently\_ignore\_no\_timestamps** (``bool``, default: `false`):
@@ -739,6 +739,32 @@ Filter: `FilterFartherPointSampling`
 
 .. image:: farther_point_sampling_example.png
    :alt: Screenshot showing point cloud before and after applying FilterFartherPointSampling
+
+|
+
+---
+
+.. _FilterInsertPoint:
+
+Filter: `FilterInsertPoint`
+---------------------------
+
+**Description**: Appends one point to a point cloud layer (a `mrpt::maps::CSimplePointsMap`, created if it does not exist). Its coordinates may be formulas of the pipeline variables, e.g. to collect the keyframe positions while building a map with ``sm2mm``, as seeds for `FilterTraversability`_. Note that ``sm2mm`` runs its ``filters`` once per handled observation: this is one point per keyframe only if one sensor is processed (e.g. only point clouds are handled by the generators).
+
+**Parameters**:
+
+* **target\_layer** (:cpp:type:`std::string`): The layer to append the point to.
+
+* **point** (sequence of 3 formulas): The point coordinates ``[x, y, z]``.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterInsertPoint
+        params:
+          target_layer: 'trajectory'
+          point: [robot_x, robot_y, robot_z]
 
 |
 
@@ -911,6 +937,47 @@ The data is updated **in-place** in the input/output layer.
 
 .. image:: normalize_intensity_example.png
    :alt: Screenshot showing point cloud before and after applying FilterNormalizeIntensity
+
+|
+
+---
+
+Filter: `FilterNormals`
+-----------------------
+
+**Description**: Estimates per-point surface normals, in place, as the eigenvector of the smallest
+eigenvalue of the covariance of the k nearest neighbors of each point.
+It adds the ``normal_x``, ``normal_y``, ``normal_z`` fields to the input layer, which must support
+extra per-point fields (e.g. ``mrpt::maps::CGenericPointsMap``).
+If the layer has the ``view_x/y/z`` fields (see the ``Generator``), normals are flipped to point
+towards the sensor, i.e. outside of solid bodies. Points with fewer than 3 neighbors get a zero normal.
+Unlike ``FilterMLS``, points are not moved nor resampled, so this is much cheaper.
+
+**Parameters**:
+
+* **pointcloud_layer** (:cpp:type:`std::string`): The layer to which normals are added.
+
+* **knn** (``unsigned int``, default: `10`): Number of nearest neighbors (including the point itself) used in the fit. Must be at least 3.
+
+* **max_search_distance** (``float``, default: `1.0`): Neighbors farther than this distance [m] are ignored.
+
+* **parallelization_grain_size** (:cpp:type:`size_t`, default: `1024`): When TBB is enabled, the minimum number of points processed per parallel task.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterNormals
+        params:
+          pointcloud_layer: 'raw'
+          knn: 10
+          max_search_distance: 1.0
+
+**Usage tips**:
+
+* The cost is dominated by building the KD-tree and the neighbor searches: on a dense 3D LiDAR scan
+  it can take tens of milliseconds, so prefer running it on a decimated cloud when possible.
+* For sparse (decimated) clouds, increase ``max_search_distance`` so that enough neighbors are found.
 
 |
 
@@ -1125,7 +1192,7 @@ This is typically used to separate **static** (high occupancy) and **dynamic** (
 
 * **output\_layer\_dynamic\_objects** (:cpp:type:`std::string`, optional): Output layer for points within low-occupancy voxels ("dynamic objects").
 
-* **occupancy\_threshold** (``float``, default: `0.6f`): The occupancy probability threshold. Voxels above this are considered "static".
+* **occupancy\_threshold** (``double``, default: `0.4`): The occupancy probability threshold :math:`t` (:math:`t` and :math:`1-t` are equivalent). Points in voxels with an occupancy above :math:`\max(t,1-t)` are "static", below :math:`\min(t,1-t)` "dynamic", and those in between (uncertain), or outside of the voxel map, go to **neither** output layer. Hence, a threshold farther from 0.5 drops more points from both outputs.
 
 .. code-block:: yaml
 
@@ -1301,6 +1368,71 @@ Typical use case: some odometry systems voxelize incoming scans *after* transfor
           output_pointcloud_layer: 'deskewed_world'
           pose: [robot_x, robot_y, robot_z, robot_yaw, robot_pitch, robot_roll]
           invert_pose: false
+
+|
+
+---
+
+.. _FilterTraversability:
+
+Filter: `FilterTraversability`
+------------------------------
+
+**Description**: Finds the obstacles for a ground vehicle in a 3D point cloud, typically a whole map without dynamic objects: steep slopes, steps and drop-offs, and anything at the height of the vehicle body above the local ground. Gentle slopes remain traversable, unlike with a fixed height band relative to the vehicle.
+
+The cloud is analyzed on a 2D grid of ``resolution``:
+
+1. **Ground model**: the lowest point of each cell is its ground, if not too far above the lowest points around it (``ground_envelope_size``, ``ground_envelope_slope_deg``). Cells where only treetops, wall or table tops were seen get their ground interpolated from neighboring ground, up to ``ground_fill_distance``. Under tree canopies the ground hits may be meters apart, so both this distance and the envelope window must be large enough. Never observed cells take the ground of the nearest cell with ground, up to ``ground_fill_distance_unobserved``, so sparse ground stays continuous and steps are not smoothed away; as a consequence, the edge of a drop-off whose lower side was never seen is placed up to that distance past the real edge (reduce it if that matters).
+2. **Per cell checks**: a cell is not traversable if the slope of a plane fitted to the ground within ``slope_window_radius`` exceeds ``max_slope_deg``, if the ground height changes by more than ``max_step`` to a neighbor cell (only next to observed cells: between never observed ones it is an artifact of the fill), or if it has at least ``body_min_points`` points between ``body_min_height`` and ``body_max_height`` above its ground (higher overhangs are ignored).
+3. **Reachability** (only with ``seeds_pointcloud_layer``, e.g. the trajectory followed while mapping, see `FilterInsertPoint`_): the traversable region is grown from the seeds, traversable by definition within ``seeds_radius``, without crossing steps. Obstacles are then the border of the reachable region (including never observed cells if ``unknown_is_obstacle``, e.g. the hidden side of a drop-off) and all non traversable cells up to ``obstacle_distance`` from it. Without seeds, all non traversable observed cells are obstacles.
+
+The outputs are points at the cell centers, at their ground height. The grid is dense over the bounding box of the input: use a coarser resolution for very large maps.
+
+**Parameters**:
+
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`): The input 3D point cloud (map frame, z up).
+
+* **seeds\_pointcloud\_layer** (:cpp:type:`std::string`, optional): Points known to be traversable. Enables the reachability analysis.
+
+* **output\_layer\_obstacles** (:cpp:type:`std::string`, optional): Output layer with one point per obstacle cell.
+
+* **output\_layer\_traversable** (:cpp:type:`std::string`, optional): Output layer with one point per reachable (or, without seeds, traversable) cell. At least one output layer must be given.
+
+* **resolution** (``float``, default: `0.20`): Grid cell size (m).
+
+* **max\_slope\_deg** (``float``, default: `15.0`): Maximum traversable slope (deg).
+
+* **slope\_window\_radius** (``float``, default: `0.40`): Half size of the window to fit the ground plane (m).
+
+* **max\_step** (``float``, default: `0.15`): Maximum ground height change between neighbor cells (m).
+
+* **body\_min\_height**, **body\_max\_height** (``float``, default: `0.25`, `1.20`): Height band of the vehicle body above the ground (m).
+
+* **body\_min\_points** (:cpp:type:`uint32_t`, default: `2`): Minimum points in the body band for an obstacle.
+
+* **ground\_envelope\_size** (``float``, default: `5.0`), **ground\_envelope\_slope\_deg** (``float``, default: `15.0`): Window and tolerated slope of the ground lower envelope.
+
+* **ground\_fill\_distance** (``float``, default: `3.0`): Maximum distance to interpolate ground into observed cells whose lowest point is not ground, e.g. under a tree canopy (m).
+
+* **ground\_fill\_distance\_unobserved** (``float``, default: `1.0`): Maximum distance to interpolate ground into never observed cells (m).
+
+* **seeds\_radius** (``float``, default: `0.30`): Radius around each seed point that is traversable (m).
+
+* **unknown\_is\_obstacle** (``bool``, default: `true`): Whether never observed cells bordering the reachable region are obstacles.
+
+* **obstacle\_distance** (``float``, default: `2.0`): Non traversable cells up to this distance from the reachable region are obstacles (m).
+
+.. code-block:: yaml
+
+    final_filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterTraversability
+        params:
+          input_pointcloud_layer: 'static'
+          seeds_pointcloud_layer: 'trajectory'
+          output_layer_obstacles: 'obstacles'
+          max_slope_deg: 15.0
+          max_step: 0.15
 
 |
 
