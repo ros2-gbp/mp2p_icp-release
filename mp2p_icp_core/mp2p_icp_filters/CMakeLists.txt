@@ -38,14 +38,17 @@ set(LIB_SRCS
   src/FilterMLS.cpp
   src/FilterNormalizeIntensity.cpp
   src/FilterPlanePatches.cpp
+  src/FilterInsertPoint.cpp
   src/FilterPoleDetector.cpp
   src/FilterPolygon2D.cpp
   src/FilterRangeBiasCorrection.cpp
   src/FilterRemoveByVoxelOccupancy.cpp
   src/FilterRemovePointCloudField.cpp
   src/FilterRenameLayer.cpp
+  src/FilterNormals.cpp
   src/FilterSOR.cpp
   src/FilterTransformPointCloud.cpp
+  src/FilterTraversability.cpp
   src/FilterVoxelSlice.cpp
   src/FilterVoxelSOR.cpp
   src/Generator.cpp
@@ -58,6 +61,7 @@ set(LIB_SRCS
   src/PointCloudToVoxelGrid.cpp
   src/PointCloudToVoxelGridAverage.cpp
   src/PointCloudToVoxelGridSingle.cpp
+  src/estimate_up_from_normals.cpp
   src/sm2mm.cpp
   #
   src/register.cpp # This must be last
@@ -87,14 +91,17 @@ set(LIB_PUBLIC_HDRS
   include/mp2p_icp_filters/FilterMLS.h
   include/mp2p_icp_filters/FilterNormalizeIntensity.h
   include/mp2p_icp_filters/FilterPlanePatches.h
+  include/mp2p_icp_filters/FilterInsertPoint.h
   include/mp2p_icp_filters/FilterPoleDetector.h
   include/mp2p_icp_filters/FilterPolygon2D.h
   include/mp2p_icp_filters/FilterRangeBiasCorrection.h
   include/mp2p_icp_filters/FilterRemoveByVoxelOccupancy.h
   include/mp2p_icp_filters/FilterRenameLayer.h
   include/mp2p_icp_filters/FilterRemovePointCloudField.h
+  include/mp2p_icp_filters/FilterNormals.h
   include/mp2p_icp_filters/FilterSOR.h
   include/mp2p_icp_filters/FilterTransformPointCloud.h
+  include/mp2p_icp_filters/FilterTraversability.h
   include/mp2p_icp_filters/FilterVoxelSlice.h
   include/mp2p_icp_filters/FilterVoxelSOR.h
   include/mp2p_icp_filters/Generator.h
@@ -105,6 +112,7 @@ set(LIB_PUBLIC_HDRS
   include/mp2p_icp_filters/PointCloudToVoxelGrid.h
   include/mp2p_icp_filters/PointCloudToVoxelGridAverage.h
   include/mp2p_icp_filters/PointCloudToVoxelGridSingle.h
+  include/mp2p_icp_filters/estimate_up_from_normals.h
   include/mp2p_icp_filters/sm2mm.h
 )
 
