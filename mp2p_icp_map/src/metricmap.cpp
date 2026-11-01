@@ -21,6 +21,7 @@
 #include <mp2p_icp/MetricMapMergeCapable.h>
 #include <mp2p_icp/metricmap.h>
 #include <mrpt/containers/yaml.h>
+#include <mrpt/core/format.h>
 #include <mrpt/maps/CGenericPointsMap.h>
 #include <mrpt/maps/CVoxelMap.h>
 #include <mrpt/maps/CVoxelMapRGB.h>
@@ -83,7 +84,10 @@ mrpt::maps::CPointsMap::Ptr onlyFinitePoints(const mrpt::maps::CPointsMap& src)
         if (isFinitePt(i)) nFinite++;
     }
 
-    if (nFinite == n) return {};  // usual case: nothing to filter out
+    if (nFinite == n)
+    {
+        return {};  // usual case: nothing to filter out
+    }
 
     auto out = mrpt::maps::CGenericPointsMap::Create();
     out->reserve(nFinite);
@@ -92,10 +96,36 @@ mrpt::maps::CPointsMap::Ptr onlyFinitePoints(const mrpt::maps::CPointsMap& src)
     const auto ctx = out->prepareForInsertPointsFrom(src);
     for (size_t i = 0; i < n; i++)
     {
-        if (isFinitePt(i)) out->insertPointFrom(i, ctx);
+        if (isFinitePt(i))
+        {
+            out->insertPointFrom(i, ctx);
+        }
     }
 
     return out;
+}
+
+/** Sets the per-point directions used to hide back-facing points, if enabled
+ *  and the map has them. */
+void setBackFacing(
+    mrpt::viz::VisualObjectParams_Points& glPts, const mrpt::maps::CPointsMap& pts,
+    const mp2p_icp::render_params_point_layer_t& p)
+{
+#if MRPT_VERSION >= 0x030504
+    if (!p.hideBackFacing)
+    {
+        return;
+    }
+    auto d = pts.getPointDirectionsForRendering();
+    glPts.setBackFacingMaxAngle(
+        d.fromNormals ? p.backFacingMaxAngleNormals_deg : p.backFacingMaxAngleView_deg);
+    glPts.setPointDirections(std::move(d.directions));
+    glPts.enableHideBackFacingPoints(true);
+#else
+    (void)glPts;
+    (void)pts;
+    (void)p;
+#endif
 }
 
 inline bool isFiniteXYZ(const mrpt::math::TPoint3Df& p)
@@ -118,7 +148,10 @@ void dropNonFinitePoints(mrpt::viz::CPointCloudColoured& glPts)
     for (size_t src = 0; src < n; src++)
     {
         const auto p = glPts.getPoint3Df(src);
-        if (!isFiniteXYZ(p)) continue;
+        if (!isFiniteXYZ(p))
+        {
+            continue;
+        }
 
         if (dst != src)
         {
@@ -438,6 +471,15 @@ void metric_map_t::get_visualization_map_layer(
         // use its own default renderer:
         map->getVisualizationInto(o);
 
+        // Source of per-point directions, compacted exactly like the render
+        // objects below, so their sizes match when it is a single cloud:
+        mrpt::maps::CPointsMap::Ptr dirsSrc;
+        if (pts && p.hideBackFacing)
+        {
+            dirsSrc = onlyFinitePoints(*pts);
+            if (!dirsSrc) dirsSrc = pts;
+        }
+
         // apply the point size to ALL point cloud objects (a map type such as
         // KeyframePointCloudMap inserts one object per keyframe), and drop the
         // non-finite points the map may have drawn (see dropNonFinitePoints()):
@@ -449,6 +491,7 @@ void metric_map_t::get_visualization_map_layer(
                 break;
             }
             dropNonFinitePoints(*glPtsCol);
+            if (dirsSrc) setBackFacing(*glPtsCol, *dirsSrc, p);
             glPtsCol->setPointSize(p.pointSize);
             if (p.force_alpha_channel)
             {
@@ -463,6 +506,7 @@ void metric_map_t::get_visualization_map_layer(
                 break;
             }
             dropNonFinitePoints(*glPts);
+            if (dirsSrc) setBackFacing(*glPts, *dirsSrc, p);
             glPts->setPointSize(p.pointSize);
         }
 
@@ -490,6 +534,7 @@ void metric_map_t::get_visualization_map_layer(
         // color point cloud:
         auto glPts = mrpt::viz::CPointCloudColoured::Create();
         glPts->loadFromPointsMap(pts.get());
+        setBackFacing(*glPts, *pts, p);
 
         glPts->setPointSize(p.pointSize);
         if (p.force_alpha_channel)
@@ -519,6 +564,7 @@ void metric_map_t::get_visualization_map_layer(
         // uniform color point cloud:
         auto glPts = mrpt::viz::CPointCloud::Create();
         glPts->loadFromPointsMap(pts.get());
+        setBackFacing(*glPts, *pts, p);
 
         glPts->setPointSize(p.pointSize);
         glPts->setColor_u8(p.color);
@@ -535,6 +581,14 @@ void metric_map_t::clear() { *this = metric_map_t(); }
 void metric_map_t::merge_with(
     const metric_map_t& otherPc, const std::optional<mrpt::math::TPose3D>& otherRelativePose)
 {
+    // Merging a map into itself would append to the containers being read:
+    if (&otherPc == this)
+    {
+        const metric_map_t copy = otherPc;
+        merge_with(copy, otherRelativePose);
+        return;
+    }
+
     auto pose = mrpt::poses::CPose3D::Identity();
 
     if (otherRelativePose.has_value())
@@ -565,12 +619,16 @@ void metric_map_t::merge_with(
             otherPc.planes.begin(), otherPc.planes.end(), std::back_inserter(planes),
             [&](const plane_patch_t& l)
             {
-                plane_patch_t g;
-                g.centroid = pose.composePoint(l.centroid);
+                plane_patch_t g = l;  // keeps area and point count
+                g.centroid      = pose.composePoint(l.centroid);
 
-                // TODO(JLBC): Finish rotating planes
-                // ...
-                THROW_EXCEPTION("To-do");
+                // Transform one point of the plane and its normal:
+                const mrpt::math::TVector3D n  = l.plane.getNormalVector();
+                const double                n2 = n.sqrNorm();
+                ASSERTMSG_(n2 > 0, "Cannot transform a plane with a null normal vector");
+                const mrpt::math::TPoint3D p0 = n * (-l.plane.coefs[3] / n2);
+                g.plane                       = mrpt::math::TPlane::FromPointAndNormal(
+                                          pose.composePoint(p0), pose.rotateVector(n));
                 return g;
             });
     }
@@ -616,8 +674,13 @@ void metric_map_t::merge_with(
         {  // merge with existing layer:
             if (auto pts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(layers[name]); pts)
             {
-                pts->insertAnotherMap(
-                    std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(otherMap).get(), pose);
+                const auto otherPts = std::dynamic_pointer_cast<mrpt::maps::CPointsMap>(otherMap);
+                ASSERTMSG_(
+                    otherPts, mrpt::format(
+                                  "Cannot merge layer '%s': the target is a point cloud but the "
+                                  "source is a '%s'",
+                                  name.c_str(), otherMap->GetRuntimeClass()->className));
+                pts->insertAnotherMap(otherPts.get(), pose);
                 continue;
             }
             auto mrg_trg = std::dynamic_pointer_cast<MetricMapMergeCapable>(layers[name]);
@@ -837,15 +900,8 @@ bool metric_map_t::load_from_file(
 
 metric_map_t::Ptr metric_map_t::get_shared_from_this()
 {
-    try
-    {
-        return shared_from_this();
-    }
-    catch (const std::bad_weak_ptr&)
-    {
-        // Not created as a shared_ptr.
-        return {};
-    }
+    // Empty if not created as a shared_ptr.
+    return weak_from_this().lock();
 }
 
 metric_map_t::Ptr metric_map_t::get_shared_from_this_or_clone()
@@ -860,15 +916,8 @@ metric_map_t::Ptr metric_map_t::get_shared_from_this_or_clone()
 
 metric_map_t::ConstPtr metric_map_t::get_shared_from_this() const
 {
-    try
-    {
-        return shared_from_this();
-    }
-    catch (const std::bad_weak_ptr&)
-    {
-        // Not created as a shared_ptr.
-        return {};
-    }
+    // Empty if not created as a shared_ptr.
+    return weak_from_this().lock();
 }
 
 metric_map_t::ConstPtr metric_map_t::get_shared_from_this_or_clone() const
