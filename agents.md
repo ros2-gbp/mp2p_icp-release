@@ -44,13 +44,16 @@ Build via colcon only. Each library exports its own CMake target (e.g.
 ## CLI applications
 
 Argument parsing uses CLI11. Core: `mm2las`, `mm2ply`, `mm2txt`, `mm2grid`, `mm-filter`,
-`mm-info`, `mm-georef`, `sm2mm`, `sm-cli`, `icp-run`, `kitti2mm`, `txt2mm`,
+`mm-info`, `mm-georef`, `mm-merge`, `sm2mm`, `sm-cli`, `icp-run`, `kitti2mm`, `txt2mm`,
 `rawlog-filter`. Viz: `mm-viewer`, `icp-log-viewer`.
 
 ## GUI apps (mp2p_icp_viz)
 
 Dear ImGui (from the `mrpt_imgui_vendor` ROS package, target `imgui::imgui`). Shared code
 in `apps/imgui_app_common/`; 3D views use `mrpt::imgui::CImGuiSceneView`.
+`ImGuiAppShell` merges the vendor's Material Symbols font into the default one, so
+`ICON_MS_*` macros work in labels; only a curated subset of icons is embedded (see the
+vendor's `scripts/regenerate_icon_font.py`), others render as missing glyphs.
 
 **Do not delete as dead code:** the axis-corner mini-viewports in mm-viewer are kept in
 sync but invisible, because MRPT 2.x only renders the `"main"` viewport.
@@ -68,17 +71,27 @@ All components are `Parameterizable`, configured via YAML.
 `tbb::parallel_reduce`; use `tbb::parallel_deterministic_reduce` with an explicit grain
 size. Guarded by `test-mp2p_solver_determinism`.
 
+**Pose covariance conventions:** `Results::optimal_tf.cov` (every `covariance()` method)
+is in the `CPose3DPDFGaussian` layout `[x y z yaw pitch roll]`, translation in the global
+frame. The solvers linearize in the right SE(3) tangent `pose·exp([rho, omega])`, and the
+GN `prior` information is applied in that tangent of the prior mean. Convert between the
+two only with the helpers in `covariance.h`. Guarded by `test-mp2p_covariance_conventions`.
+
 ## Filter pipeline
 
 Filters are chained and applied in-place to `metric_map_t`, configured via YAML
 (`filters:` list of `class_name` + `params`). Invariants:
 
 - Voxel keys come from `coord2idx`, which divides by the resolution (never multiply by a
-  precomputed reciprocal).
+  precomputed reciprocal) and rounds down with `std::floor`: a plain integer cast rounds
+  toward zero and merges the two voxels on each side of an axis plane into one of double
+  width. Guarded by `test-mp2p_voxel_grid_indexing`.
 - Voxel hash functors return the full 32-bit hash, never masked to fewer bits: a bounded
   hash makes `tsl::robin_map` grow without limit once it holds that many keys.
 - Never `insertPointFast()` into a layer with registered per-point fields: use
   `insertPointFrom()`, or field vectors fall out of sync with x/y/z.
+- Load YAML files with `mp2p_icp::load_yaml_file()` (`yaml_variables.h`), never
+  `yaml::FromFile()`, so `${VAR|default}` variables get expanded.
 
 ## Build and test
 
@@ -108,8 +121,14 @@ workspace), `mola_imu_preintegration` (optional, for `FilterDeskew`).
 
 ## Update rules
 
-- New/updated `mp2p_icp_filters` classes: sync `docs/source/mp2p_icp_filters.rst` and
-  `~/code/mp2p-pipeline-editor-sources` if it exists (read its `README.md`)
+- New/updated `mp2p_icp_filters` classes (new classes, parameters, behavior): keep
+  `docs/source/mp2p_icp_filters.rst` in sync, and `~/code/mp2p-pipeline-editor-sources`
+  if it exists (read its `README.md`)
+- New/updated CLI apps (new apps, arguments, behavior): keep `docs/source/app_<name>.rst`
+  (including the `--help` output it embeds), `mp2p_icp_applications.rst`, the app's
+  `README.md`, the root `README.md` app list and the app list above in sync. A new app page
+  also needs its `.. include::` stub in the MOLAorg/mola repo (`docs/source/`, plus its
+  listings in `map-tools.rst` / `why-mola.rst`), or the docs CI fails
 
 ## MRPT3 to-do
 
