@@ -1,0 +1,13 @@
+Source: ros-kilted-mp2p-icp-core
+Section: misc
+Priority: optional
+Maintainer: "Jose-Luis Blanco-Claraco" <joseluisblancoc@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), cmake, libcli11-dev, libeigen3-dev, libtbb-dev, ros-kilted-mola-common, ros-kilted-mola-imu-preintegration, ros-kilted-mrpt-containers, ros-kilted-mrpt-maps, ros-kilted-mrpt-obs, ros-kilted-mrpt-poses, ros-kilted-mrpt-rtti, ros-kilted-mrpt-serialization, ros-kilted-mrpt-system, ros-kilted-mrpt-tfest, ros-kilted-mrpt-topography, ros-kilted-ros-environment, ros-kilted-ros-workspace
+Homepage: https://github.com/MOLAorg/mp2p_icp
+Standards-Version: 3.9.2
+
+Package: ros-kilted-mp2p-icp-core
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libcli11-dev, libeigen3-dev, libtbb-dev, ros-kilted-mola-common, ros-kilted-mola-imu-preintegration, ros-kilted-mrpt-containers, ros-kilted-mrpt-maps, ros-kilted-mrpt-obs, ros-kilted-mrpt-poses, ros-kilted-mrpt-rtti, ros-kilted-mrpt-serialization, ros-kilted-mrpt-system, ros-kilted-mrpt-tfest, ros-kilted-mrpt-topography, ros-kilted-ros-workspace
+Description: C++ libraries for multi primitive-to-primitive (MP2P) ICP algorithms and point cloud processing pipelines, plus headless CLI applications.
+ No GUI/display dependencies; see mp2p_icp_viz for the GUI apps.
