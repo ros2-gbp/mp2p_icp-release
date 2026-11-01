@@ -23,6 +23,7 @@
 #endif
 
 #include <mp2p_icp/pointcloud_sanity_check.h>
+#include <mp2p_icp/yaml_variables.h>
 #include <mp2p_icp_filters/CreateMetricMapFromDefinition.h>
 #include <mp2p_icp_filters/Generator.h>
 #include <mp2p_icp_filters/GetOrCreatePointLayer.h>
@@ -42,11 +43,45 @@
 #include <mrpt/system/filesystem.h>
 #include <mrpt/version.h>
 
+#include <map>
+#include <mutex>
+#include <string>
+
 #include "Generator_view_vector_impl.h"
 
 IMPLEMENTS_MRPT_OBJECT(Generator, mrpt::rtti::CObject, mp2p_icp_filters)
 
 using namespace mp2p_icp_filters;
+
+struct Generator::ImuState
+{
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
+    std::mutex                                       mtx;
+    std::map<std::string, mola::imu::ImuTransformer> transformers;  // by sensor label
+#endif
+};
+
+Generator::ImuStateHolder::ImuStateHolder() : p_(std::make_unique<ImuState>()) {}
+Generator::ImuStateHolder::~ImuStateHolder() = default;
+
+Generator::ImuStateHolder::ImuStateHolder(const ImuStateHolder& o)
+    : p_(std::make_unique<ImuState>())
+{
+    *this = o;
+}
+
+Generator::ImuStateHolder& Generator::ImuStateHolder::operator=(
+    [[maybe_unused]] const ImuStateHolder& o)
+{
+#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
+    if (this != &o)
+    {
+        std::scoped_lock lck(p_->mtx, o.p_->mtx);
+        p_->transformers = o.p_->transformers;
+    }
+#endif
+    return *this;
+}
 
 Generator::Generator() : mrpt::system::COutputLogger("Generator") {}
 
@@ -248,31 +283,6 @@ bool Generator::filterVelodyneScan(  //
     return true;  // implemented
 }
 
-#if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
-class ImuTransformerManager
-{
-   public:
-    static mola::imu::ImuTransformer& getInstance(const std::string& sensorLabel)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto                        it = transformers_.find(sensorLabel);
-        if (it == transformers_.end())
-        {
-            auto [newIt, _] = transformers_.emplace(sensorLabel, mola::imu::ImuTransformer());
-            return newIt->second;
-        }
-        return it->second;
-    }
-
-   private:
-    static std::mutex                                       mutex_;
-    static std::map<std::string, mola::imu::ImuTransformer> transformers_;
-};
-
-std::mutex                                       ImuTransformerManager::mutex_;
-std::map<std::string, mola::imu::ImuTransformer> ImuTransformerManager::transformers_;
-#endif
-
 bool Generator::processIMU(const mrpt::obs::CObservationIMU& imu_raw) const
 {
 #if defined(MP2P_ICP_HAS_MOLA_IMU_PREINTEGRATION)
@@ -284,10 +294,13 @@ bool Generator::processIMU(const mrpt::obs::CObservationIMU& imu_raw) const
 
     const double t = mrpt::Clock::toDouble(imu_raw.timestamp);
 
-    auto& imu_transformer = ImuTransformerManager::getInstance(imu_raw.sensorLabel);
-
-    // Convert IMU readings to vehicle frame of reference:
-    const auto imu = imu_transformer.process(imu_raw);
+    // Convert IMU readings to vehicle frame of reference. The transformer is
+    // stateful, so it is used under the lock too, not only looked up:
+    mrpt::obs::CObservationIMU imu;
+    {
+        std::lock_guard<std::mutex> lck(imu_state_->mtx);
+        imu = imu_state_->transformers[imu_raw.sensorLabel].process(imu_raw);
+    }
 
     // gyroscope data:
     if (imu.has(mrpt::obs::IMU_WX) && imu.has(mrpt::obs::IMU_WY) && imu.has(mrpt::obs::IMU_WZ))
@@ -611,7 +624,7 @@ GeneratorSet mp2p_icp_filters::generators_from_yaml(
 GeneratorSet mp2p_icp_filters::generators_from_yaml_file(
     const std::string& filename, const mrpt::system::VerbosityLevel& vLevel)
 {
-    const auto yamlContent = mrpt::containers::yaml::FromFile(filename);
+    const auto yamlContent = mp2p_icp::load_yaml_file(filename);
 
     ASSERT_(yamlContent.has("generators") && yamlContent["generators"].isSequence());
 
