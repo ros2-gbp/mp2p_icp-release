@@ -24,6 +24,7 @@
 #include <mp2p_icp/Matcher_Point2Plane.h>
 #include <mp2p_icp/Matcher_Points_DistanceThreshold.h>
 
+#include <functional>
 #include <variant>
 
 namespace
@@ -162,6 +163,76 @@ void test_adaptive_distances()
     ASSERT_NEAR_(declaredParameterValue(m, "0.5*MATCH_THRESHOLD"), 0.25, 1e-4);
     ASSERT_NEAR_(declaredParameterValue(m, "0.2*MATCH_THRESHOLD"), 0.10, 1e-4);
 }
+
+void test_parameter_source_variable_lookup()
+{
+    mp2p_icp::ParameterSource src;
+    ASSERT_(!src.hasVariable("A"));
+    ASSERT_(!src.getVariableValue("A").has_value());
+    ASSERT_(src.getVariableValues().empty());
+
+    src.updateVariable("A", 2.5);
+    ASSERT_(src.hasVariable("A"));
+    ASSERT_(!src.hasVariable("B"));
+    ASSERT_NEAR_(src.getVariableValue("A").value(), 2.5, 1e-12);
+    ASSERT_EQUAL_(src.getVariableValues().size(), 1U);
+}
+
+/** Exposes the protected declaration of an unsigned integer parameter. */
+class UintParam : public mp2p_icp::Parameterizable
+{
+   public:
+    uint32_t value = 0;
+    void     declare(const std::string& expr) { parseAndDeclareParameter(expr, value); }
+};
+
+bool throws(const std::function<void()>& f)
+{
+    try
+    {
+        f();
+    }
+    catch (const std::exception&)
+    {
+        return true;
+    }
+    return false;
+}
+
+void test_uint32_parameter_range()
+{
+    // Constant expressions are converted at declaration time:
+    {
+        UintParam p;
+        p.declare("42");
+        ASSERT_EQUAL_(p.value, 42U);
+        ASSERT_(throws(
+            []
+            {
+                UintParam q;
+                q.declare("-1");
+            }));
+        ASSERT_(throws(
+            []
+            {
+                UintParam q;
+                q.declare("1e10");
+            }));
+    }
+
+    // Variable expressions, when realized:
+    mp2p_icp::ParameterSource src;
+    UintParam                 p;
+    p.declare("N");
+    mp2p_icp::AttachToParameterSource(p, src);
+
+    src.updateVariable("N", 7);
+    src.realize();
+    ASSERT_EQUAL_(p.value, 7U);
+
+    src.updateVariable("N", -3);
+    ASSERT_(throws([&] { src.realize(); }));
+}
 }  // namespace
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
@@ -172,6 +243,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
         test_point2plane_distance_threshold();
         test_point2line_distance_threshold();
         test_adaptive_distances();
+        test_parameter_source_variable_lookup();
+        test_uint32_parameter_range();
     }
     catch (std::exception& e)
     {

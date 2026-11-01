@@ -105,7 +105,8 @@ int commandLevel()
 
     // save:
     std::cout << "Saving result to: '" << outFile << "... " << std::endl;
-    sm.saveToFile(outFile);
+    const bool saveOk = sm.saveToFile(outFile);
+    ASSERTMSG_(saveOk, "Error writing output file");
 
     return 0;
 }
@@ -124,6 +125,10 @@ int printCommandsLevel(bool showErrorMsg)
         R"XXX(Usage:
 
     sm-cli level <input.simplemap> <output.simplemap>
+
+Rotates the map so the keyframe heights vary as little as possible, which
+assumes a vehicle moving on flat ground. For handheld or aerial maps of
+buildings, use `sm-cli level-walls` instead, which levels from the geometry.
 
 )XXX");
 
