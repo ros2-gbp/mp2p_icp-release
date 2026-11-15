@@ -26,6 +26,7 @@ C++ libraries for multi primitive-to-primitive (MP2P) ICP algorithms and flexibl
 
 - [Main library documentation and C++ API](https://docs.mola-slam.org/latest/module-mp2p-icp.html)
 - License: New BSD 3-Clause (Note that each module of [MOLA](https://github.com/MOLAorg/mola) has its own license)
+- Third-party code: `cfgpath.h` (public domain) and `robin-map` (MIT), see the [AUTHORS](AUTHORS) file.
 
 ## Introduction
 
@@ -35,7 +36,7 @@ The project provides these C++ libraries:
  * `mp2p_icp_filters`: With point cloud filtering and manipulation algorithms including decimation, voxelization, statistical outlier removal, edge/plane extraction, and various geometric transformations. It depends on `mp2p_icp_map`.
 
 These libraries and their CLI apps (below, except the GUI ones) live in the **`mp2p_icp_core`** ROS package,
-which has no GUI/display dependencies. The two GUI apps (`mm-viewer`, `icp-log-viewer`) live in the
+which has no GUI/display dependencies. The GUI and rendering apps (`mm-viewer`, `mm-render`, `icp-log-viewer`) live in the
 **`mp2p_icp_viz`** package instead. The **`mp2p_icp`** package is a metapackage that depends on both, so
 `apt install ros-$ROS_DISTRO-mp2p-icp` (or `<depend>mp2p_icp</depend>`) still gets everything, exactly as before
 this split — use `mp2p_icp_core` directly if you only need the headless libraries/apps.
@@ -56,6 +57,8 @@ The full repository also includes these applications (see [mp2p_icp_core/apps/](
  
  * **[mm2txt](https://docs.mola-slam.org/latest/app_mm2txt.html)**: Exports metric map layers as space-delimited CSV/TXT files with header rows. Ideal for data analysis in spreadsheet applications or custom processing pipelines. Supports selective layer and field export.
  
+ * **[mm2kml](https://docs.mola-slam.org/latest/app_mm2kml.html)**: Exports georeferenced metric maps (and optionally trajectories) as Google Earth KMZ files, with the point cloud as a ground overlay and/or a 3D model, plus an optional fly-by tour.
+ 
  * **[mm2las](https://docs.mola-slam.org/latest/app_mm2las.html)**: Exports metric maps to industry-standard LAS 1.4 format with Point Format 8 support. Includes automatic color mapping, extra dimensions for custom fields. Compatible with CloudCompare, QGIS, and ArcGIS.
 
 ### Map Processing & Analysis Tools
@@ -69,6 +72,8 @@ The full repository also includes these applications (see [mp2p_icp_core/apps/](
 
 ### Visualization Tools
  * **[mm-viewer](https://docs.mola-slam.org/latest/app_mm-viewer.html)**: GUI application to visualize metric map (`.mm`) files. Supports loading additional 3D scenes and trajectory files in TUM format.
+ 
+ * **[mm-render](https://docs.mola-slam.org/latest/app_mm-render.html)**: Renders metric map layers into an image file, off-screen (no GUI) and with a configurable camera. Useful for scripted generation of figures.
  
  * **[icp-log-viewer](https://docs.mola-slam.org/latest/app_icp-log-viewer.html)**: Interactive GUI for debugging ICP pipelines. Visualizes ICP log files (`.icplog`) with autoplay mode and detailed inspection of registration results. Essential for understanding and optimizing ICP algorithm performance.
 
