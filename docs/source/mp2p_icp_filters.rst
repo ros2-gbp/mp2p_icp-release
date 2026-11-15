@@ -95,14 +95,19 @@ Filter: `FilterAdjustTimestamps`
 * **silently\_ignore\_no\_timestamps** (``bool``, default: `false`): If `true`, no exception is thrown if the input layer does not contain timestamps;
   an empty output is produced instead.
 
-* **time\_offset** (``double``, default: `0.0`): An optional time offset to be added on top of the adjustment.
-  Useful for synchronizing multiple sensors.
+* **time\_offset** (``double``, default: `0.0`): A time offset [s] added on top of the adjustment.
+  When merging clouds from several sensors, set it to this cloud's timestamp minus the common
+  reference timestamp (e.g. that of the first sensor), so all points share one time reference.
+  This requires the clouds to share the same earliest (`EarliestIsZero`) or middle (`MiddleIsZero`)
+  raw per-point time, e.g. sensors with the same scan rate.
+  With `Normalize`, the offset is scaled by :math:`1/\mathrm{span}` like the timestamps.
 
 * **method** (:cpp:enum:`TimestampAdjustMethod`, default: `MiddleIsZero`): The criterion for adjusting timestamps:
 
   * **EarliestIsZero**: Adjusts such that the earliest timestamp is 0. Successive ones represent real elapsed seconds.
   * **MiddleIsZero**: Adjusts such that the middle timestamp is 0. The rest are positive/negative elapsed seconds.
-  * **Normalize**: Normalizes all timestamps to the range :math:`[0, 1]`.
+  * **Normalize**: Normalizes all timestamps to the range :math:`[0, 1]`. These are not elapsed seconds
+    and the reference time is not modified, so do not use them for deskewing or with `FilterAbsoluteTimestamp`.
 
 .. code-block:: yaml
 
@@ -646,8 +651,20 @@ Filter: `FilterDeskew`
 
 * **twist** (:cpp:type:`std::optional<mrpt::math::TTwist3D>`):
   The velocity (linear and angular) of the vehicle in the local frame.
-  Only used when `method=Linear`.
+  Required by `method=Linear`. With the IMU methods, if defined, its linear part is the velocity at the
+  scan reference time (t=0), unless `use_twist_with_imu_methods=false`.
   May be dynamically bound via the `mp2p_icp::Parameterizable` API.
+
+* **use\_twist\_with\_imu\_methods** (``bool``, default: `true`):
+  If `false`, the IMU methods use `twist` only as a fallback, and take the velocity sample of the
+  `LocalVelocityBuffer` at its own stamp, integrating the IMU from there (e.g. a state estimator's velocity at the
+  previous scan, carried to this one with the IMU). If no velocity sample falls within the sample
+  window (twice the scan time span around t=0), a defined `twist` is used at t=0 as with `true`.
+  Requires `mola_imu_preintegration` newer than 3.0.1 to rotate that sample into the frame of t=0.
+
+* **ignore\_accelerometer** (``bool``, default: `false`):
+  If `true`, the IMU methods integrate only the gyroscope: the velocity at t=0 (or that of the
+  buffer's sample) is held constant over the scan.
 
 * **points\_already\_global** (``bool``, default: `false`):
   If `true`, the input points are already expressed in global coordinates (e.g. in sm2mm pipelines).
