@@ -5,7 +5,7 @@
 -->
 <package format="3">
   <name>mp2p_icp_core</name>
-  <version>3.1.0</version>
+  <version>3.2.0</version>
   <description>C++ libraries for multi primitive-to-primitive (MP2P) ICP algorithms and point cloud processing pipelines, plus headless CLI applications. No GUI/display dependencies; see mp2p_icp_viz for the GUI apps.</description>
 
   <maintainer email="joseluisblancoc@gmail.com">Jose-Luis Blanco-Claraco</maintainer>
@@ -34,10 +34,17 @@
   <depend>mrpt_topography</depend>
   <depend>eigen</depend>
   <depend>cli11</depend>
+  <depend>zlib</depend>
 
   <depend>tbb</depend>  <!-- Required to exploit parallelization in many ICP algorithms -->
 
-  <depend>mola_imu_preintegration</depend>
+  <depend version_gte="3.1.0">mola_imu_preintegration</depend> <!-- ImuTransformer with accel_scale and rate-aware filters -->
+
+  <!-- Python bindings (skipped if pybind11 is not found) -->
+  <build_depend>pybind11-dev</build_depend>
+  <build_depend>python3-dev</build_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <!-- optional for part of the tests -->
   <!-- depend>mola_test_datasets</depend>  -->

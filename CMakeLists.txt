@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 #        Multi primitive-to-primitive (MP2P) ICP C++ library
 #
-# Copyright (C) 2018-2020, Jose Luis Blanco-Claraco, contributors (AUTHORS.md)
+# Copyright (C) 2018-2020, Jose Luis Blanco-Claraco, contributors (AUTHORS)
 # All rights reserved.
 # Released under BSD 3-Clause License. See COPYING.
 # ------------------------------------------------------------------------------
@@ -117,6 +117,14 @@ option(MP2PICP_BUILD_TESTING "Build unit tests" ON)
 if(MP2PICP_BUILD_TESTING)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# -----------------------
+# Python bindings (skipped if pybind11 is not found):
+# -----------------------
+option(MP2PICP_BUILD_PYTHON "Build the Python bindings, if pybind11 is found" ON)
+if(MP2PICP_BUILD_PYTHON)
+  add_subdirectory(python)
 endif()
 
 # -----------------------
