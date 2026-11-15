@@ -2,6 +2,11 @@
 Changelog for package mp2p_icp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.2.0 (2026-11-15)
+------------------
+* Add AUTHORS file; unify license headers and SPDX tags.
+* Contributors: Jose Luis Blanco-Claraco
+
 3.1.0 (2026-11-01)
 ------------------
 
