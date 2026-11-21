@@ -92,7 +92,7 @@ Filter: `FilterAdjustTimestamps`
 
 * **pointcloud\_layer** (:cpp:type:`std::string`): The name of the point cloud layer to process.
 
-* **silently\_ignore\_no\_timestamps** (``bool``, default: `false`): If `true`, no exception is thrown if the input layer does not contain timestamps;
+* **silently\_ignore\_no\_timestamps** (``bool``, required): If `true`, no exception is thrown if the input layer does not contain timestamps;
   an empty output is produced instead.
 
 * **time\_offset** (``double``, default: `0.0`): A time offset [s] added on top of the adjustment.
@@ -102,7 +102,7 @@ Filter: `FilterAdjustTimestamps`
   raw per-point time, e.g. sensors with the same scan rate.
   With `Normalize`, the offset is scaled by :math:`1/\mathrm{span}` like the timestamps.
 
-* **method** (:cpp:enum:`TimestampAdjustMethod`, default: `MiddleIsZero`): The criterion for adjusting timestamps:
+* **method** (:cpp:enum:`TimestampAdjustMethod`, required): The criterion for adjusting timestamps:
 
   * **EarliestIsZero**: Adjusts such that the earliest timestamp is 0. Successive ones represent real elapsed seconds.
   * **MiddleIsZero**: Adjusts such that the middle timestamp is 0. The rest are positive/negative elapsed seconds.
@@ -155,8 +155,43 @@ Filter: `FilterBoundingBox`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: bounding_box_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_bounding_box_example.png
    :alt: Screenshot showing point cloud before and after applying FilterBoundingBox
+
+|
+
+---
+
+Filter: `FilterByExpression`
+----------------------------
+
+**Description**: Evaluates a mathematical or logical expression for each point, and moves the points
+for which it is positive to one output layer, and the rest to another one. Expressions use the
+`ExprTk <https://github.com/ArashPartow/exprtk>`_ syntax, and may use as variables the coordinates
+``x``, ``y``, ``z`` and any other point field of the input cloud (e.g. ``intensity``, ``ring``).
+
+**Parameters**:
+
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`): The input point cloud layer name.
+
+* **expression** (:cpp:type:`std::string`): The expression to evaluate per point, e.g. ``"ring > 10"``
+  or ``"x^2 + y^2 < 4.0"``.
+
+* **output\_layer\_passed** (:cpp:type:`std::string`, optional): Output layer for points where the expression is :math:`> 0`.
+
+* **output\_layer\_not\_passed** (:cpp:type:`std::string`, optional): Output layer for points where the expression is :math:`\leq 0`.
+
+At least one of the two output layers must be given.
+
+.. code-block:: yaml
+
+    filters:
+      #...
+      - class_name: mp2p_icp_filters::FilterByExpression
+        params:
+          input_pointcloud_layer: 'raw'
+          expression: 'x^2 + y^2 < 25.0 and intensity > 0.2'
+          output_layer_passed: 'near_bright'
 
 |
 
@@ -177,9 +212,10 @@ Filter: `FilterByIntensity`
 
 * **output\_layer\_mid\_intensity** (:cpp:type:`std::string`, optional): Output layer for points with :math:`\text{intensity} \in [\text{low\_threshold}, \text{high\_threshold}]`.
 
-* **low\_threshold** (``float``, default: `0.10`): The minimum intensity value for the 'mid' range.
+* **low\_threshold** (``float``, required): The minimum intensity value for the 'mid' range, in the units of the
+  ``intensity`` field (raw sensor units, or [0,1] after ``FilterNormalizeIntensity``).
 
-* **high\_threshold** (``float``, default: `0.90`): The maximum intensity value for the 'mid' range.
+* **high\_threshold** (``float``, required): The maximum intensity value for the 'mid' range.
 
 .. code-block:: yaml
 
@@ -194,7 +230,7 @@ Filter: `FilterByIntensity`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: by_intensity_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_by_intensity_example.png
    :alt: Screenshot showing point cloud before and after applying FilterByIntensity
 
 |
@@ -236,7 +272,7 @@ Filter: `FilterByRange`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: by_range_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_by_range_example.png
    :alt: Screenshot showing point cloud before and after applying FilterByRange
 
 |
@@ -270,7 +306,7 @@ Filter: `FilterByRing`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: by_ring_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_by_ring_example.png
    :alt: Screenshot showing point cloud before and after applying FilterByRing
 
 |
@@ -313,8 +349,8 @@ Useful for edge extraction (LOAM-style).
 
 **Parameters**:
 
-* **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The input point cloud layer name.
-  **Must be sorted for meaningful results.**
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`): The input point cloud layer name.
+  **Must be sorted for meaningful results**, and have a ``ring`` point field (``uint16``, as in LiDAR clouds, or ``float``).
 
 * **output\_layer\_larger\_curvature** (:cpp:type:`std::string`, optional): Output layer for points with larger curvature (often "edges").
 
@@ -322,11 +358,11 @@ Useful for edge extraction (LOAM-style).
 
 * **output\_layer\_other** (:cpp:type:`std::string`, optional): Output layer for points that do not fall into the above two categories.
 
-* **max\_cosine** (``float``, default: `0.5f`): A threshold related to the angle of the local neighborhood for classifying high curvature.
+* **max\_cosine** (``float``, required): A threshold related to the angle of the local neighborhood for classifying high curvature.
 
-* **min\_clearance** (``float``, default: `0.02f`): The minimum distance a neighbor must be to be considered in the curvature calculation (m).
+* **min\_clearance** (``float``, required): The minimum distance a neighbor must be to be considered in the curvature calculation (m).
 
-* **max\_gap** (``float``, default: `1.00f`): The maximum gap distance between a point and its neighbor (m).
+* **max\_gap** (``float``, required): The maximum gap distance between a point and its neighbor (m).
 
 The three numeric parameters above accept dynamic formulas, e.g. `"0.02*ESTIMATED_OBSERVATION_RADIUS"`.
 
@@ -339,10 +375,13 @@ The three numeric parameters above accept dynamic formulas, e.g. `"0.02*ESTIMATE
           input_pointcloud_layer: 'raw_sorted'
           output_layer_larger_curvature: 'edges'
           output_layer_smaller_curvature: 'planes'
+          max_cosine: 0.5
+          min_clearance: 0.02
+          max_gap: 1.0
 
 .. rubric:: Before → After Screenshot
 
-.. image:: curvature_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_curvature_example.png
    :alt: Screenshot showing point cloud before and after applying FilterCurvature
 
 |
@@ -395,7 +434,7 @@ If the output layer already exists, new points are accumulated on it; previous c
 
 .. rubric:: Before → After Screenshot
 
-.. image:: decimate_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_decimate_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDecimate
 
 |
@@ -459,7 +498,7 @@ And the multiple-outputs form, e.g. to obtain a denser cloud to feed a local map
 
 .. rubric:: Before → After Screenshot
 
-.. image:: decimate_adaptive_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_decimate_adaptive_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDecimateAdaptive
 
 |
@@ -558,7 +597,7 @@ Filter: `FilterDecimateVoxels`
 * **flatten\_to** (``std::optional<double>``): If defined, the 3D points are "flattened" into a 2D planar cloud at a constant height :math:`z`.
   Additional point fields (ring, intensity, timestamp) are copied from the input point each output point stands for.
 
-* **decimate\_method** (:cpp:enum:`DecimateMethod`, default: `FirstPoint`): The method to pick the representative point for each voxel:
+* **decimate\_method** (:cpp:enum:`DecimateMethod`, required): The method to pick the representative point for each voxel:
 
   * **DecimateMethod::FirstPoint**: Picks the first point inserted into the voxel (the fastest method).
   * **DecimateMethod::ClosestToAverage**: Picks the point closest to the average position of all voxel points.
@@ -581,7 +620,7 @@ Filter: `FilterDecimateVoxels`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: decimate_voxels_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_decimate_voxels_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDecimateVoxels
 
 |
@@ -611,7 +650,7 @@ Filter: `FilterDeleteLayer`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: delete_layer_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_delete_layer_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDeleteLayer
 
 |
@@ -722,7 +761,7 @@ Filter: `FilterDeskew`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: deskew_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_deskew_example.png
    :alt: Screenshot showing point cloud before and after applying FilterDeskew
 
 |
@@ -754,7 +793,7 @@ Filter: `FilterFartherPointSampling`
 
 .. rubric:: Before → After Screenshot
 
-.. image:: farther_point_sampling_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_farther_point_sampling_example.png
    :alt: Screenshot showing point cloud before and after applying FilterFartherPointSampling
 
 |
@@ -817,7 +856,7 @@ This uses the target layer's standard `insertObservation()` method.
 
 .. rubric:: Before → After Screenshot
 
-.. image:: merge_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_merge_example.png
    :alt: Screenshot showing point cloud before and after applying FilterMerge
 
 |
@@ -833,23 +872,23 @@ The computed normals are stored as new per-point fields in the output map: ``nor
 
 **Parameters**:
 
-* **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The point cloud layer used to **build** the MLS surface (i.e., the source of the local neighborhoods).
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`): The point cloud layer used to **build** the MLS surface (i.e., the source of the local neighborhoods).
 
-* **output\_pointcloud\_layer** (:cpp:type:`std::string`, default: `mls`): The layer where the smoothed/projected points and their computed normals will be stored.
+* **output\_pointcloud\_layer** (:cpp:type:`std::string`): The layer where the smoothed/projected points and their computed normals will be stored.
 
 * **distinct\_cloud\_layer** (:cpp:type:`std::string`, optional): Required if :cpp:member:`upsampling_method` is set to ``DISTINCT_CLOUD``. Points from this layer are projected onto the surface computed from :cpp:member:`input_pointcloud\_layer`.
 
-* **search\_radius** (``double``, default: `0.05`): The search radius (in meters) for finding neighbors to fit the MLS surface.
+* **search\_radius** (``double``, required): The search radius (in meters) for finding neighbors to fit the MLS surface.
 
-* **polynomial\_order** (``int``, default: `2`): The order of the polynomial to fit (e.g., ``1`` for planar, ``2`` for quadratic).
+* **polynomial\_order** (``int``, required): The order of the polynomial to fit (e.g., ``1`` for planar, ``2`` for quadratic).
 
 * **min\_neighbors\_for\_fit** (``int``, default: `3`): The minimum number of neighbors required within the search radius to successfully compute the MLS fit.
 
-* **projection\_method** (:cpp:enum:`ProjectionMethod`, default: `SIMPLE`): The method used for projecting points onto the fitted surface:
+* **projection\_method** (:cpp:enum:`ProjectionMethod`, default: ``FilterMLS::ProjectionMethod::SIMPLE``): The method used for projecting points onto the fitted surface:
 
   * **SIMPLE**: Projects the point along the normal direction onto the polynomial surface.
 
-* **upsampling\_method** (:cpp:enum:`UpsamplingMethod`, default: `NONE`): The method to determine which points are processed:
+* **upsampling\_method** (:cpp:enum:`UpsamplingMethod`, default: ``FilterMLS::UpsamplingMethod::NONE``): The method to determine which points are processed:
 
   * **NONE**: The points from :cpp:member:`input_pointcloud\_layer` are smoothed/projected.
   * **DISTINCT\_CLOUD**: The points from :cpp:member:`distinct\_cloud\_layer` are projected onto the surface built from :cpp:member:`input\_pointcloud\_layer`.
@@ -897,14 +936,14 @@ The computed normals are stored as new per-point fields in the output map: ``nor
           # Method for projecting points onto the fitted polynomial surface.
           # SIMPLE: Project point along the normal direction to the polynomial at
           #         the projected (u,v) location. (Fast and robust).
-          projection_method: SIMPLE
+          projection_method: FilterMLS::ProjectionMethod::SIMPLE
 
           # Method for determining which points to smooth/project.
           # NONE: Smooth the 'input_pointcloud_layer' itself (standard smoothing).
           # DISTINCT_CLOUD: Build the surface from 'input_pointcloud_layer', but
           #                 project the points from 'distinct_cloud_layer' onto it
           #                 (used for upsampling or projection).
-          upsampling_method: NONE
+          upsampling_method: FilterMLS::UpsamplingMethod::NONE
 
           # Required only if upsampling_method is DISTINCT_CLOUD.
           # distinct_cloud_layer: "sparse_scan"
@@ -918,7 +957,7 @@ The computed normals are stored as new per-point fields in the output map: ``nor
 
 .. rubric:: Before → After Screenshot
 
-.. image:: mls_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_mls_example.png
    :alt: Screenshot showing point cloud before and after applying FilterMLS
 
 |
@@ -952,7 +991,7 @@ The data is updated **in-place** in the input/output layer.
 
 .. rubric:: Before → After Screenshot
 
-.. image:: normalize_intensity_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_normalize_intensity_example.png
    :alt: Screenshot showing point cloud before and after applying FilterNormalizeIntensity
 
 |
@@ -1073,23 +1112,27 @@ Filter: `FilterPoleDetector`
 ----------------------------
 
 **Description**: Identifies and separates points that appear to belong to a pole or vertical structure.
-This is done by analyzing the min/max Z-span in 2D grid cells.
+This is done by comparing the mean height of the points in each cell of a 2D grid with that of its neighbor cells.
 
 **Parameters**:
 
-* **input\_pointcloud\_layer** (:cpp:type:`std::string`, default: `raw`): The input point cloud layer name.
+* **input\_pointcloud\_layer** (:cpp:type:`std::string`): The input point cloud layer name.
 
 * **output\_layer\_poles** (:cpp:type:`std::string`, optional): Output layer name for points that **are** poles.
 
 * **output\_layer\_no\_poles** (:cpp:type:`std::string`, optional): Output layer name for points that **are not** poles.
 
-* **grid\_size** (``float``, default: `2.0f`): Size of the 2D grid cell used for analysis (m).
+* **grid\_size** (``float``, required): Size of the 2D grid cell used for analysis (m).
 
-* **minimum\_relative\_height** (``float``, default: `2.5f`): Minimum required height span in a cell to be considered a pole candidate.
+* **minimum\_relative\_height** (``float``, required): Minimum height of the mean of a cell above the mean of a neighbor cell (m).
 
-* **maximum\_relative\_height** (``float``, default: `25.0f`): Maximum allowed height span in a cell.
+* **maximum\_relative\_height** (``float``, required): Maximum height of the mean of a cell above the mean of a neighbor cell (m).
 
-* **minimum\_points\_per\_cell** (:cpp:type:`uint32\_t`, default: `50`): Minimum number of points required in a cell for analysis.
+* **minimum\_pole\_points** (:cpp:type:`uint32\_t`, default: `5`): Minimum number of points in a cell for it to be analyzed.
+  Cells with fewer points go to neither output layer.
+
+* **minimum\_neighbors\_checks\_to\_pass** (:cpp:type:`uint32\_t`, default: `3`): Minimum number of the 8 neighbor cells
+  whose mean the cell rises above, within the two heights above, for its points to be a pole.
 
 .. code-block:: yaml
 
@@ -1099,12 +1142,14 @@ This is done by analyzing the min/max Z-span in 2D grid cells.
         params:
           input_pointcloud_layer: 'raw'
           output_layer_poles: 'poles'
+          output_layer_no_poles: 'no_poles'
           grid_size: 1.0
-          minimum_relative_height: 3.0
+          minimum_relative_height: 1.2
+          maximum_relative_height: 25.0
 
 .. rubric:: Before → After Screenshot
 
-.. image:: pole_detector_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_pole_detector_example.png
    :alt: Screenshot showing point cloud before and after applying FilterPoleDetector
 
 |
@@ -1224,7 +1269,7 @@ This is typically used to separate **static** (high occupancy) and **dynamic** (
 
 .. rubric:: Before → After Screenshot
 
-.. image:: remove_by_voxel_occupancy_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_remove_by_voxel_occupancy_example.png
    :alt: Screenshot showing point cloud before and after applying FilterRemoveByVoxelOccupancy
 
 |
@@ -1462,13 +1507,13 @@ Filter: `FilterVoxelSlice`
 
 **Parameters**:
 
-* **input\_voxel\_layer** (:cpp:type:`std::string`): The input voxel map layer (:cpp:class:`mrpt::maps::CVoxelMap`).
+* **input\_layer** (:cpp:type:`std::string`): The input voxel map layer (:cpp:class:`mrpt::maps::CVoxelMap`).
 
-* **output\_gridmap\_layer** (:cpp:type:`std::string`): The output 2D occupancy grid map layer.
+* **output\_layer** (:cpp:type:`std::string`): The output 2D occupancy grid map layer.
 
-* **z\_min** (``double``): The minimum Z-coordinate for the slice.
+* **slice\_z\_min** (``double``): The minimum Z-coordinate for the slice.
 
-* **z\_max** (``double``): The maximum Z-coordinate for the slice.
+* **slice\_z\_max** (``double``): The maximum Z-coordinate for the slice.
 
 .. code-block:: yaml
 
@@ -1476,14 +1521,14 @@ Filter: `FilterVoxelSlice`
       #...
       - class_name: mp2p_icp_filters::FilterVoxelSlice
         params:
-          input_voxel_layer: 'voxel_map'
-          output_gridmap_layer: '2d_slice'
-          z_min: -0.5
-          z_max: 0.5
+          input_layer: 'voxel_map'
+          output_layer: '2d_slice'
+          slice_z_min: 0.3
+          slice_z_max: 1.5
 
 .. rubric:: Before → After Screenshot
 
-.. image:: voxel_slice_example.png
+.. image:: https://mrpt.github.io/imgs/mp2p_icp_filters_voxel_slice_example.png
    :alt: Screenshot showing point cloud before and after applying FilterVoxelSlice
 
 |
@@ -1561,3 +1606,82 @@ This localized approach dramatically reduces computational cost by limiting KD-t
 **Performance notes:** The voxel-based approach provides substantial speedup over global SOR, especially for large point clouds (>1M points).
 Typical speedup factors range from 5-20× depending on point cloud density and voxel size. The ``use_tsl_robin_map`` option enables
 further optimization using a high-performance hash map implementation.
+
+|
+
+---
+
+Generators
+----------
+
+**Generators** are the first stage of a pipeline: they convert each raw sensor observation into
+one or more map layers, on which the filters above then operate. They are listed in the
+``generators:`` section of :ref:`sm2mm pipelines <sm2mm_pipelines>` and of MOLA-LO pipelines.
+If none is given, a default ``mp2p_icp_filters::Generator`` is used.
+
+``mp2p_icp_filters::Generator``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Description**: Inserts each observation into a map layer: by default a point cloud of class
+``default_pointcloud_class``, or any other metric map class given in ``metric_map_definition``.
+
+**Parameters**:
+
+* **target\_layer** (:cpp:type:`std::string`, default: ``raw``): The layer to insert the observation into.
+
+* **metric\_map\_definition** (YAML map, optional): The class and parameters of a custom metric map
+  layer (e.g. a voxel map or an occupancy grid). Numeric values may be formulas written as ``$f{expr}``.
+  Alternatively, **metric\_map\_definition\_ini\_file** points to an external ``.ini`` file.
+
+* **process\_class\_names\_regex** (:cpp:type:`std::string`, default: ``.*``): Only observations of matching
+  C++ classes are processed, e.g. ``mrpt::obs::CObservation2DRangeScan``.
+
+* **process\_sensor\_labels\_regex** (:cpp:type:`std::string`, default: ``.*``): Only observations with matching
+  sensor labels are processed, e.g. ``lidar_.*``.
+
+* **throw\_on\_unhandled\_observation\_class** (``bool``, default: ``false``): Throw instead of ignoring
+  observations that cannot be converted.
+
+* **generate\_view\_vector** (``bool``, default: ``true``): Add the ``view_x``, ``view_y``, ``view_z`` fields
+  (unit vector from each point towards the sensor) to generic point cloud layers.
+
+* **default\_pointcloud\_class** (:cpp:type:`std::string`, default: ``mrpt::maps::CGenericPointsMap``): Class of
+  the layer generated from point cloud observations. Empty means the class of the observation's own cloud.
+
+* **filterOutPointsAtZero** (``bool``, default: ``false``): Discard points at :math:`(0,0,0)`, typical of
+  invalid returns in organized LiDAR clouds.
+
+.. code-block:: yaml
+
+    generators:
+      - class_name: mp2p_icp_filters::Generator
+        params:
+          target_layer: 'raw'
+          process_sensor_labels_regex: 'lidar'
+          filterOutPointsAtZero: true
+
+``mp2p_icp_filters::GeneratorEdgesFromCurvature``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Description**: Extracts edge points from organized LiDAR scans (``mrpt::obs::CObservationRotatingScan``):
+points whose two neighbors along the same ring are far from forming a straight line. Accepts all the
+parameters of ``Generator``, plus:
+
+* **max\_cosine** (``float``): A point is an edge if :math:`|\cos \theta| <` ``max_cosine``, with :math:`\theta`
+  the angle between the vectors from the point to its two ring neighbors.
+
+* **min\_point\_clearance** (``float``, default: ``0.10``): Points closer than this distance [m] to either
+  neighbor are not evaluated.
+
+``mp2p_icp_filters::GeneratorEdgesFromRangeImage``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Description**: Extracts edge points from range images (organized LiDAR scans and 3D range cameras):
+points whose range departs from the local trend of range differences along the row. Accepts all the
+parameters of ``Generator``, plus:
+
+* **score\_threshold** (``int``): Minimum score (squared deviation from the local range trend, normalized by
+  its variance) for a point to be an edge.
+
+* **planes\_target\_layer** (:cpp:type:`std::string`): Layer for the plane points, for 3D range cameras.
+  May be empty.
