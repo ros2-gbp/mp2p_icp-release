@@ -1,21 +1,21 @@
 .. _mp2p_icp_python:
 
 ======================
-Python API
+Python API: mp2p_icp
 ======================
 
 The ``mp2p_icp`` Python package wraps the ``mp2p_icp_core`` C++ libraries: metric maps
 (``*.mm`` files), ICP pipelines, filters and generators, plus point cloud file formats and
 conversions to other Python libraries.
 
-It builds on the ``mrpt`` Python package (MRPT 3): point clouds are ``mrpt.maps`` objects
+It builds on the ``mrpt`` Python package: point clouds are ``mrpt.maps`` objects
 (``CGenericPointsMap``, ``CSimplePointsMap``...) and poses are ``mrpt.poses`` / ``mrpt.math``
 types, so both APIs can be mixed freely.
 
 Install
 =======
 
-**pip** (Linux x86_64 and aarch64, Python 3.10 to 3.14): ``pip install mp2p-icp``. It also
+**pip** (Linux x86_64 and aarch64, Python 3.10 or newer): ``pip install mp2p-icp``. It also
 installs the ``mrpt3`` wheel, whose MRPT libraries it uses.
 
 **ROS 2**: the bindings are built with ``mp2p_icp_core`` whenever ``pybind11`` is found
